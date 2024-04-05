@@ -22,6 +22,10 @@ using namespace glm;
 #include "hdr.h"
 #include "fbo.h"
 
+#include <iostream>
+
+#include "boundingBox.h"
+
 
 ///////////////////////////////////////////////////////////////////////////////
 // Various globals
@@ -36,12 +40,16 @@ int windowWidth, windowHeight;
 ivec2 g_prevMouseCoords = { -1, -1 };
 bool g_isMouseDragging = false;
 
+// Debug 
+bool debug = false;
+
 ///////////////////////////////////////////////////////////////////////////////
 // Shader programs
 ///////////////////////////////////////////////////////////////////////////////
 GLuint shaderProgram;       // Shader for rendering the final image
 GLuint simpleShaderProgram; // Shader used to draw the shadow map
 GLuint backgroundProgram;
+GLuint boundingShaderProgram;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Environment
@@ -58,8 +66,10 @@ vec3 point_light_color = vec3(1.f, 1.f, 1.f);
 
 float point_light_intensity_multiplier = 10000.0f;
 
-
-
+///////////////////////////////////////////////////////////////////////////////
+// BoundingBox
+///////////////////////////////////////////////////////////////////////////////
+BoundingBox boundingBox(vec3(0,0,0), vec3(3,3,3), 2);
 
 ///////////////////////////////////////////////////////////////////////////////
 // Camera parameters.
@@ -100,6 +110,12 @@ void loadShaders(bool is_reload)
 	{
 		shaderProgram = shader;
 	}
+
+	shader = labhelper::loadShaderProgram("../project/boundingBox.vert", "../project/boundingBox.frag", is_reload);
+	if (shader != 0)
+	{
+		boundingShaderProgram = shader;
+	}
 }
 
 
@@ -130,6 +146,10 @@ void initialize()
 	// Load environment map
 	///////////////////////////////////////////////////////////////////////
 	environmentMap = labhelper::loadHdrTexture("../scenes/envmaps/" + envmap_base_name + ".hdr");
+
+	std::cout << "jeee" << std::endl;
+	//boundingBox.generateMesh();
+	std::cout << "neee" << std::endl;
 
 
 	glEnable(GL_DEPTH_TEST); // enable Z-buffering
@@ -260,7 +280,13 @@ void display(void)
 		labhelper::perf::Scope s( "Scene" );
 		drawScene( shaderProgram, viewMatrix, projMatrix, lightViewMatrix, lightProjMatrix );
 	}
-	debugDrawLight(viewMatrix, projMatrix, vec3(lightPosition));
+
+	//glUseProgram(boundingShaderProgram);
+	//boundingBox.submitTriangles();
+
+	if (debug) {
+		debugDrawLight(viewMatrix, projMatrix, vec3(lightPosition));
+	}
 
 }
 
@@ -291,6 +317,9 @@ bool handleEvents(void)
 			{
 				labhelper::showGUI();
 			}
+		}
+		if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_b) {
+			debug = !debug;
 		}
 		if(event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT
 		   && (!labhelper::isGUIvisible() || !ImGui::GetIO().WantCaptureMouse))
@@ -380,6 +409,8 @@ int main(int argc, char* argv[])
 
 	bool stopRendering = false;
 	auto startTime = std::chrono::system_clock::now();
+
+	labhelper::hideGUI();
 
 	while(!stopRendering)
 	{
