@@ -57,9 +57,50 @@ layout(location = 0) out vec4 fragmentColor;
 
 
 
-vec3 calculateDirectIllumiunation(vec3 wo, vec3 n)
+vec3 calculateDirectIllumiunation(vec3 wo, vec3 n, vec3 base_color)
 {
-	return vec3(material_color);
+	vec3 direct_illum = base_color;
+
+	float d = length(viewSpaceLightPosition - viewSpacePosition);
+
+	vec3 Li = point_light_intensity_multiplier * point_light_color * 1/(d*d);
+
+	vec3 wi = normalize(viewSpaceLightPosition - viewSpacePosition);
+	
+	if(dot(wi, n) <= 0.0)
+		return vec3(0.0f);
+
+
+	vec3 diffuse_term = base_color * 1.0/PI * length(dot(n, wi)) * Li;
+
+
+	
+	vec3 wh = normalize(wi + wo);
+	float ndotwh = max(0.0001, dot(n,wh));
+	float ndotwi = max(0.0001, dot(n, wi));
+	float ndotwo = max(0.0001, dot(n,wo));
+	float whdotwi = max(0.0001, dot(wh,wi));
+	float wodotwh = max(0.0001, dot(wo,wh));
+
+
+
+	float F = material_fresnel + (1 - material_fresnel)*pow(1-whdotwi, 5.0);
+	float D = ((material_shininess +2)/ (PI * 2.0) ) * pow(ndotwh, material_shininess);
+	float G = min(1, min(2*ndotwh*ndotwo/wodotwh, 2*ndotwh*ndotwi/wodotwh));
+	
+
+	float brdf =  F * D * G / (4 * ndotwo *  ndotwi);
+	
+
+	vec3 dielectric_term = brdf * ndotwi * Li + (1-F) * diffuse_term;
+
+	vec3 metal_term = brdf * base_color * ndotwi * Li;
+
+	direct_illum = material_metalness * metal_term + (1-material_metalness) * dielectric_term;
+
+
+	return direct_illum;
+	//return vec3(material_color);
 }
 
 vec3 calculateIndirectIllumination(vec3 wo, vec3 n)
@@ -75,8 +116,10 @@ void main()
 	vec3 wo = -normalize(viewSpacePosition);
 	vec3 n = normalize(viewSpaceNormal);
 
+	vec3 base_color = material_color;
+
 	// Direct illumination
-	vec3 direct_illumination_term = visibility * calculateDirectIllumiunation(wo, n);
+	vec3 direct_illumination_term = visibility * calculateDirectIllumiunation(wo, n, base_color);
 
 	// Indirect illumination
 	vec3 indirect_illumination_term = calculateIndirectIllumination(wo, n);

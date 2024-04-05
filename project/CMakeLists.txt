@@ -7,13 +7,20 @@ file(GLOB_RECURSE SHADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.vert"
     "${CMAKE_CURRENT_SOURCE_DIR}/*.frag"
 )
+
+file(GLOB SOURCES
+    "Header Files/*.h"
+    "Source Files/*.cpp"
+)
 # Separate filter for shaders.
 source_group("Shaders" FILES ${SHADERS})
 
 # Build and link executable.
 add_executable ( ${PROJECT_NAME}
     main.cpp
+    boundingBox.cpp
     ${SHADERS}
+    ${SOURCES}
     )
 
 target_link_libraries ( ${PROJECT_NAME} labhelper )
