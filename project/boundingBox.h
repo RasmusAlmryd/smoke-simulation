@@ -13,6 +13,8 @@ public:
 	GLuint m_vao;
 	GLuint m_positionBuffer;
 	GLuint m_indexBuffer;
+	GLuint m_colorBuffer;
+	GLuint m_texBuffer;
 
 
 	vec3 m_dimensions; // x,y,z dimensions

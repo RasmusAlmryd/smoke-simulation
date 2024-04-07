@@ -625,6 +625,95 @@ GLuint loadShaderProgram(const std::string& vertexShader, const std::string& fra
 	return shaderProgram;
 }
 
+GLuint loadShaderProgram(const std::string& vertexShader, const std::string& fragmentShader, const std::string& geometryShader, bool allow_errors)
+{
+	GLuint vShader = glCreateShader(GL_VERTEX_SHADER);
+	GLuint gShader = glCreateShader(GL_GEOMETRY_SHADER);
+	GLuint fShader = glCreateShader(GL_FRAGMENT_SHADER);
+
+	std::ifstream vs_file(vertexShader);
+	std::string vs_src((std::istreambuf_iterator<char>(vs_file)), std::istreambuf_iterator<char>());
+
+	std::ifstream gs_file(geometryShader); 
+	std::string gs_src((std::istreambuf_iterator<char>(vs_file)), std::istreambuf_iterator<char>()); 
+
+	std::ifstream fs_file(fragmentShader);
+	std::string fs_src((std::istreambuf_iterator<char>(fs_file)), std::istreambuf_iterator<char>());
+
+	const char* vs = vs_src.c_str();
+	const char* gs = gs_src.c_str(); 
+	const char* fs = fs_src.c_str();
+
+	glShaderSource(vShader, 1, &vs, nullptr);
+	glShaderSource(gShader, 1, &gs, nullptr);
+	glShaderSource(fShader, 1, &fs, nullptr);
+	// text data is not needed beyond this point
+
+	glCompileShader(vShader);
+	int compileOk = 0;
+	glGetShaderiv(vShader, GL_COMPILE_STATUS, &compileOk);
+	if (!compileOk)
+	{
+		std::string err = GetShaderInfoLog(vShader);
+		if (allow_errors)
+		{
+			non_fatal_error(err, "Vertex Shader");
+		}
+		else
+		{
+			fatal_error(err, "Vertex Shader");
+		}
+		return 0;
+	}
+
+	glCompileShader(gShader);
+	glGetShaderiv(gShader, GL_COMPILE_STATUS, &compileOk);
+	if (!compileOk)
+	{
+		std::string err = GetShaderInfoLog(gShader);
+		if (allow_errors)
+		{
+			non_fatal_error(err, "Vertex Shader");
+		}
+		else
+		{
+			fatal_error(err, "Vertex Shader");
+		}
+		return 0;
+	}
+
+	glCompileShader(fShader);
+	glGetShaderiv(fShader, GL_COMPILE_STATUS, &compileOk);
+	if (!compileOk)
+	{
+		std::string err = GetShaderInfoLog(fShader);
+		if (allow_errors)
+		{
+			non_fatal_error(err, "Fragment Shader");
+		}
+		else
+		{
+			fatal_error(err, "Fragment Shader");
+		}
+		return 0;
+	}
+
+	GLuint shaderProgram = glCreateProgram();
+	glAttachShader(shaderProgram, fShader);
+	glDeleteShader(fShader);
+	glAttachShader(shaderProgram, gShader);
+	glDeleteShader(gShader);
+	glAttachShader(shaderProgram, vShader);
+	glDeleteShader(vShader);
+	if (!allow_errors)
+		CHECK_GL_ERROR();
+
+	if (!linkShaderProgram(shaderProgram, allow_errors))
+		return 0;
+
+	return shaderProgram;
+}
+
 
 bool linkShaderProgram(GLuint shaderProgram, bool allow_errors)
 {

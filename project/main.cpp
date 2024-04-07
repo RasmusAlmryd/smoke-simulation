@@ -74,7 +74,8 @@ BoundingBox boundingBox(vec3(0,0,0), vec3(3,3,3), 2);
 ///////////////////////////////////////////////////////////////////////////////
 // Camera parameters.
 ///////////////////////////////////////////////////////////////////////////////
-vec3 cameraPosition(-70.0f, 50.0f, 70.0f);
+//vec3 cameraPosition(-70.0f, 50.0f, 70.0f);
+vec3 cameraPosition(1.0f, 1.0f, -7.0f);
 vec3 cameraDirection = normalize(vec3(0.0f) - cameraPosition);
 float cameraSpeed = 10.f;
 
@@ -111,9 +112,10 @@ void loadShaders(bool is_reload)
 		shaderProgram = shader;
 	}
 
-	shader = labhelper::loadShaderProgram("../project/boundingBox.vert", "../project/boundingBox.frag", is_reload);
+	shader = labhelper::loadShaderProgram("../project/boundingBox.vert", "../project/boundingBox.frag" , is_reload);
 	if (shader != 0)
 	{
+		std::cout << "shader" << std::endl;
 		boundingShaderProgram = shader;
 	}
 }
@@ -147,13 +149,12 @@ void initialize()
 	///////////////////////////////////////////////////////////////////////
 	environmentMap = labhelper::loadHdrTexture("../scenes/envmaps/" + envmap_base_name + ".hdr");
 
-	std::cout << "jeee" << std::endl;
-	//boundingBox.generateMesh();
-	std::cout << "neee" << std::endl;
+	boundingBox.generateMesh();
 
 
 	glEnable(GL_DEPTH_TEST); // enable Z-buffering
 	glEnable(GL_CULL_FACE);  // enables backface culling
+	//glDisable(GL_CULL_FACE);
 }
 
 void debugDrawLight(const glm::mat4& viewMatrix,
@@ -175,6 +176,19 @@ void drawBackground(const mat4& viewMatrix, const mat4& projectionMatrix)
 	labhelper::setUniformSlow(backgroundProgram, "inv_PV", inverse(projectionMatrix * viewMatrix));
 	labhelper::setUniformSlow(backgroundProgram, "camera_pos", cameraPosition);
 	labhelper::drawFullScreenQuad();
+}
+
+void drawBoundingBox(const mat4& viewMatrix, const mat4& projMatrix) {
+	glDisable(GL_CULL_FACE);
+	glDisable(GL_DEPTH_TEST);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); 
+	glUseProgram(boundingShaderProgram);
+	labhelper::setUniformSlow(boundingShaderProgram, "modelViewProjectionMatrix", projMatrix * viewMatrix * mat4(1.0f));
+	boundingBox.submitTriangles();
+	glEnable(GL_CULL_FACE);
+	glDisable(GL_BLEND);
+	glEnable(GL_DEPTH_TEST);
 }
 
 
@@ -274,15 +288,14 @@ void display(void)
 
 	{
 		labhelper::perf::Scope s( "Background" );
-		drawBackground(viewMatrix, projMatrix);
+		//drawBackground(viewMatrix, projMatrix);
 	}
 	{
 		labhelper::perf::Scope s( "Scene" );
-		drawScene( shaderProgram, viewMatrix, projMatrix, lightViewMatrix, lightProjMatrix );
+		//drawScene( shaderProgram, viewMatrix, projMatrix, lightViewMatrix, lightProjMatrix );
 	}
 
-	//glUseProgram(boundingShaderProgram);
-	//boundingBox.submitTriangles();
+	drawBoundingBox(viewMatrix, projMatrix);
 
 	if (debug) {
 		debugDrawLight(viewMatrix, projMatrix, vec3(lightPosition));

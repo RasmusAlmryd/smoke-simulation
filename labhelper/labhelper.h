@@ -138,6 +138,11 @@ std::string GetShaderInfoLog(GLuint obj);
 GLuint loadShaderProgram(const std::string& vertexShader,
                          const std::string& fragmentShader,
                          bool allow_errors = false);
+
+GLuint loadShaderProgram(const std::string& vertexShader,
+	const std::string& fragmentShader,
+	const std::string& geometryShader,
+	bool allow_errors = false);
 /**
 	 * Call to link a shader program prevoiusly loaded using loadShaderProgram.
 	 */
