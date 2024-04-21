@@ -50,6 +50,7 @@ GLuint shaderProgram;       // Shader for rendering the final image
 GLuint simpleShaderProgram; // Shader used to draw the shadow map
 GLuint backgroundProgram;
 GLuint boundingShaderProgram;
+GLuint volumeShaderProgram;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Environment
@@ -69,15 +70,18 @@ float point_light_intensity_multiplier = 10000.0f;
 ///////////////////////////////////////////////////////////////////////////////
 // BoundingBox
 ///////////////////////////////////////////////////////////////////////////////
-BoundingBox boundingBox(vec3(0,0,0), vec3(3,3,3), 2);
+IntVec3 num_cells = { 6,6,8 };
+BoundingBox boundingBox(vec3(0,0,0), num_cells, 1);
+
+GLuint gridTex;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Camera parameters.
 ///////////////////////////////////////////////////////////////////////////////
 //vec3 cameraPosition(-70.0f, 50.0f, 70.0f);
-vec3 cameraPosition(1.0f, 1.0f, -7.0f);
+vec3 cameraPosition(1.0f, 7.0f, 18.0f);
 vec3 cameraDirection = normalize(vec3(0.0f) - cameraPosition);
-float cameraSpeed = 10.f;
+float cameraSpeed = 13.f;
 
 vec3 worldUp(0.0f, 1.0f, 0.0f);
 
@@ -118,6 +122,13 @@ void loadShaders(bool is_reload)
 		std::cout << "shader" << std::endl;
 		boundingShaderProgram = shader;
 	}
+
+	shader = labhelper::loadShaderProgram("../project/volume.vert", "../project/volume.frag", is_reload);
+	if (shader != 0)
+	{
+		std::cout << "shader" << std::endl;
+		volumeShaderProgram = shader;
+	}
 }
 
 
@@ -150,6 +161,7 @@ void initialize()
 	environmentMap = labhelper::loadHdrTexture("../scenes/envmaps/" + envmap_base_name + ".hdr");
 
 	boundingBox.generateMesh();
+	boundingBox.generateVolumeTex();
 
 
 	glEnable(GL_DEPTH_TEST); // enable Z-buffering
@@ -178,13 +190,38 @@ void drawBackground(const mat4& viewMatrix, const mat4& projectionMatrix)
 	labhelper::drawFullScreenQuad();
 }
 
-void drawBoundingBox(const mat4& viewMatrix, const mat4& projMatrix) {
+void drawVolume(const mat4& viewMatrix, const mat4& projectionMatrix) {
+	glUseProgram(volumeShaderProgram);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	labhelper::setUniformSlow(volumeShaderProgram, "modelViewProjectionMatrix", projectionMatrix * viewMatrix * boundingBox.m_modelMatrix);
+
+	labhelper::setUniformSlow(volumeShaderProgram, "modelViewMatrix", viewMatrix * boundingBox.m_modelMatrix);
+	labhelper::setUniformSlow(volumeShaderProgram, "camera_pos", cameraPosition);
+
+
+	glActiveTexture(GL_TEXTURE8); 
+	glBindTexture(GL_TEXTURE_3D, boundingBox.m_gridTex);
+
+	boundingBox.submitTriangles(); 
+	glDisable(GL_BLEND);
+}
+
+void drawBoundingBox(const mat4& viewMatrix, const mat4& projectionMatrix) {
 	glDisable(GL_CULL_FACE);
 	glDisable(GL_DEPTH_TEST);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); 
 	glUseProgram(boundingShaderProgram);
-	labhelper::setUniformSlow(boundingShaderProgram, "modelViewProjectionMatrix", projMatrix * viewMatrix * mat4(1.0f));
+
+
+
+	labhelper::setUniformSlow(boundingShaderProgram, "modelViewProjectionMatrix", projectionMatrix * viewMatrix * boundingBox.m_modelMatrix);
+	
+	glActiveTexture(GL_TEXTURE8);
+	glBindTexture(GL_TEXTURE_3D, boundingBox.m_gridTex);
+	
 	boundingBox.submitTriangles();
 	glEnable(GL_CULL_FACE);
 	glDisable(GL_BLEND);
@@ -288,16 +325,19 @@ void display(void)
 
 	{
 		labhelper::perf::Scope s( "Background" );
-		//drawBackground(viewMatrix, projMatrix);
+		drawBackground(viewMatrix, projMatrix);
 	}
 	{
 		labhelper::perf::Scope s( "Scene" );
 		//drawScene( shaderProgram, viewMatrix, projMatrix, lightViewMatrix, lightProjMatrix );
 	}
-
-	drawBoundingBox(viewMatrix, projMatrix);
+	{
+		labhelper::perf::Scope s("volume");
+		drawVolume(viewMatrix, projMatrix); 
+	}
 
 	if (debug) {
+		drawBoundingBox(viewMatrix, projMatrix);
 		debugDrawLight(viewMatrix, projMatrix, vec3(lightPosition));
 	}
 
@@ -334,6 +374,10 @@ bool handleEvents(void)
 		if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_b) {
 			debug = !debug;
 		}
+		if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_u) {
+			printf("update!");
+			boundingBox.uppdateVolumeTexture();
+		}
 		if(event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT
 		   && (!labhelper::isGUIvisible() || !ImGui::GetIO().WantCaptureMouse))
 		{
@@ -355,7 +399,7 @@ bool handleEvents(void)
 			// More info at https://wiki.libsdl.org/SDL_MouseMotionEvent
 			int delta_x = event.motion.x - g_prevMouseCoords.x;
 			int delta_y = event.motion.y - g_prevMouseCoords.y;
-			float rotationSpeed = 0.1f;
+			float rotationSpeed = 0.2f;
 			mat4 yaw = rotate(rotationSpeed * deltaTime * -delta_x, worldUp);
 			mat4 pitch = rotate(rotationSpeed * deltaTime * -delta_y,
 			                    normalize(cross(cameraDirection, worldUp)));
@@ -455,6 +499,8 @@ int main(int argc, char* argv[])
 	labhelper::freeModel(fighterModel);
 	labhelper::freeModel(landingpadModel);
 	labhelper::freeModel(sphereModel);
+
+	boundingBox.freeGrid();
 
 	// Shut down everything. This includes the window and all other subsystems.
 	labhelper::shutDown(g_window);
