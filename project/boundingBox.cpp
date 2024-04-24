@@ -305,7 +305,7 @@ void BoundingBox::generateVolumeTex(void) {
 }
 
 void BoundingBox::uppdateVolumeTexture() {
-	for (int x = 0; x < m_num_cells.x; x++) {
+	/*for (int x = 0; x < m_num_cells.x; x++) {
 		for (int y = m_num_cells.y-1; y >= 0; y--) {
 			for (int z = 0; z < m_num_cells.z; z++) {
 				if (y != 0) {
@@ -321,7 +321,7 @@ void BoundingBox::uppdateVolumeTexture() {
 				}
 			}
 		}
-	}
+	}*/
 
 	glBindTexture(GL_TEXTURE_3D, m_gridTex);
 	glTexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, 0, m_num_cells.x, m_num_cells.y, m_num_cells.z, GL_RED, GL_FLOAT, &m_grid[0]);

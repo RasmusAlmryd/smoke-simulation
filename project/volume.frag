@@ -20,12 +20,13 @@ in vec3 viewSpacePosition;
 
 
 float max3 (vec3 v) {
-  return max (max (v.x, v.y), v.z);
+  return max (max (abs(v.x), abs(v.y)), abs(v.z));
 }
 
 
 vec4 simpleMarch(vec3 viewVector, vec3 start, ivec3 volumeSize){
     float inVolumeLength = max3(volumeSize);
+    viewVector = viewVector / max3(viewVector);
     int maxIter = 30;
     viewVector = (viewVector * inVolumeLength) / maxIter;
     //viewVector /= 2;

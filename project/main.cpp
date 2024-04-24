@@ -26,6 +26,8 @@ using namespace glm;
 
 #include "boundingBox.h"
 
+#include "smokeSimulation.cuh"
+
 
 ///////////////////////////////////////////////////////////////////////////////
 // Various globals
@@ -70,7 +72,7 @@ float point_light_intensity_multiplier = 10000.0f;
 ///////////////////////////////////////////////////////////////////////////////
 // BoundingBox
 ///////////////////////////////////////////////////////////////////////////////
-IntVec3 num_cells = { 6,6,8 };
+IntVec3 num_cells = { 16,16,16 };
 BoundingBox boundingBox(vec3(0,0,0), num_cells, 1);
 
 GLuint gridTex;
@@ -138,6 +140,8 @@ void loadShaders(bool is_reload)
 void initialize()
 {
 	ENSURE_INITIALIZE_ONLY_ONCE();
+
+	getGPUProperties();
 
 	///////////////////////////////////////////////////////////////////////
 	//		Load Shaders
@@ -376,6 +380,16 @@ bool handleEvents(void)
 		}
 		if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_u) {
 			printf("update!");
+			//boundingBox.uppdateVolumeTexture();
+			std::vector<int> size_grid(3);
+			size_grid[0] = num_cells.x;
+			size_grid[1] = num_cells.y;
+			size_grid[2] = num_cells.z;
+			//std::vector<float> temp_grid(size_grid[0]* size_grid[1]* size_grid[2], 0.0f);
+			//printf("%f \n", boundingBox.m_grid[27]);
+			
+			updateGrid(boundingBox.m_grid.data(), size_grid, 0.1f);
+			//printf("%f \n", boundingBox.m_grid[27]);
 			boundingBox.uppdateVolumeTexture();
 		}
 		if(event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT

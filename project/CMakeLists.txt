@@ -1,6 +1,7 @@
 cmake_minimum_required ( VERSION 3.0.2 )
 
-project ( project )
+project ( project LANGUAGES CUDA CXX)
+
 
 # Find *all* shaders.
 file(GLOB_RECURSE SHADERS
@@ -17,8 +18,10 @@ add_executable ( ${PROJECT_NAME}
     main.cpp
     boundingBox.cpp
     boundingBox.h
+    smokeSimulation.cu
     ${SHADERS}
     )
 
-target_link_libraries ( ${PROJECT_NAME} labhelper )
+
+target_link_libraries ( ${PROJECT_NAME} labhelper)
 config_build_output()
