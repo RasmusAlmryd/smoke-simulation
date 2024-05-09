@@ -380,17 +380,19 @@ bool handleEvents(void)
 		}
 		if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_u) {
 			printf("update!");
-			//boundingBox.uppdateVolumeTexture();
-			std::vector<int> size_grid(3);
-			size_grid[0] = num_cells.x;
-			size_grid[1] = num_cells.y;
-			size_grid[2] = num_cells.z;
-			//std::vector<float> temp_grid(size_grid[0]* size_grid[1]* size_grid[2], 0.0f);
+			////boundingBox.uppdateVolumeTexture();
+			//std::vector<int> size_grid(3);
+			//size_grid[0] = num_cells.x;
+			//size_grid[1] = num_cells.y;
+			//size_grid[2] = num_cells.z;
+			////std::vector<float> temp_grid(size_grid[0]* size_grid[1]* size_grid[2], 0.0f);
+			////printf("%f \n", boundingBox.m_grid[27]);
+			//
+			//updateGrid(boundingBox.m_grid.data(), size_grid, 0.1f);
 			//printf("%f \n", boundingBox.m_grid[27]);
-			
-			updateGrid(boundingBox.m_grid.data(), size_grid, 0.1f);
-			//printf("%f \n", boundingBox.m_grid[27]);
-			boundingBox.uppdateVolumeTexture();
+			float dt = 0.01f;
+			boundingBox.updateVolume(dt);
+
 		}
 		if(event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT
 		   && (!labhelper::isGUIvisible() || !ImGui::GetIO().WantCaptureMouse))

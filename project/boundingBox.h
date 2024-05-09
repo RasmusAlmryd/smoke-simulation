@@ -45,6 +45,8 @@ public:
 	// Update volume grid dimensions and generate new grid
 	void updateGridDim(IntVec3 num_cells);
 
+	void initGrid();
+
 	// Generate mesh
 	void generateMesh(void);
 
@@ -52,6 +54,8 @@ public:
 	void generateVolumeTex(void);
 
 	void uppdateVolumeTexture(void);
+
+	void updateVolume(float dt);
 
 
 	void submitTriangles(void);

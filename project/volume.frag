@@ -12,7 +12,7 @@ ivec3 volumeSize;
 
 layout(location = 0) out vec4 fragmentColor;
 
-layout(binding = 8) uniform usampler3D gridTex;
+layout(binding = 8) uniform sampler3D gridTex;
 
 in vec3 position;
 in vec4 transformedPos;
@@ -33,6 +33,7 @@ vec4 simpleMarch(vec3 viewVector, vec3 start, ivec3 volumeSize){
 
     float alpha = 0.0f;
     vec3 current = start + viewVector/2;
+    float red = 1.0f;
 
     for(int i = 0; i<maxIter; i++){
         
@@ -42,20 +43,25 @@ vec4 simpleMarch(vec3 viewVector, vec3 start, ivec3 volumeSize){
             break;
         }
 
-        if(texture(gridTex, (current/(volumeSize/2)+1)/2).r >0.1f){
+        float a = texture(gridTex, (current/(volumeSize/2)+1)/2).r;
+        vec3 dist = abs(floor(current+volumeSize/2)+0.5f - (current+volumeSize/2)) *2;
+        alpha += (1-sqrt(pow(dist.x,2) + pow(dist.y,2) + pow(dist.z,2)))*a;
+        
+        if(abs(a) > 1.0f) red = 0.0f;
+        /*if(texture(gridTex, (current/(volumeSize/2)+1)/2).r >0.1f){
             //alpha += 0.2f;
             //alpha = 1.0f;
             vec3 dist = abs(floor(current+volumeSize/2)+0.5f - (current+volumeSize/2)) *2;
-            alpha += 1-sqrt(pow(dist.x,2) + pow(dist.y,2) + pow(dist.z,2));
+            alpha += (1-sqrt(pow(dist.x,2) + pow(dist.y,2) + pow(dist.z,2))) * (a);
             
-        }
+        }*/
 
         //if(alpha >= 1.0f) break;
 
         current += viewVector;
     }
 
-    return vec4(1.0f, 1.0f, 1.0f, alpha);
+    return vec4(red, 1.0f, 1.0f, alpha);
 }
 
 

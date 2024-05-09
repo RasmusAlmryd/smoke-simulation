@@ -8,6 +8,7 @@
 #include <vector>
 
 
+#include "smokeSimulation.cuh"
 
 using namespace glm;
 
@@ -23,6 +24,8 @@ BoundingBox::BoundingBox(vec3 position, IntVec3 num_cells, int cell_size)
 	m_cell_size = cell_size;
 	m_num_cells = { 0,0,0 };
 	updateGridDim(num_cells);
+	initGrid();
+	initializeVolume(m_grid.data(), m_num_cells.x, m_num_cells.y, m_num_cells.z);
 
 	//printf(num_cells)
 
@@ -63,63 +66,22 @@ void BoundingBox::updateGridDim(IntVec3 num_cells) {
 	m_num_cells.z = num_cells.z;
 }
 
+void BoundingBox::initGrid() {
+	int y = m_num_cells.y - 2;
+	int hx = m_num_cells.x / 2;
+	int hz = m_num_cells.z / 2;
+	for (int x = 1; x < m_num_cells.x-1; x++) {
+		for (int z = 1; z < m_num_cells.z-1; z++) {
+			//if (abs(x - hx) < 3 && abs(z - hz) < 3) 
+			m_grid[x + y * m_num_cells.x + z * m_num_cells.x * m_num_cells.y] = 1.0;
+		}
+	}
+}
+
 void BoundingBox::generateMesh(void) {
 
 	
 
-	/*float positions[3 * 8] = {
-		1,1,1,
-		1,-1,1,
-		1,-1,-1,
-		1,1,-1,
-		-1,1,1,
-		-1,-1,1,
-		-1,-1,-1,
-		-1,1,-1,
-	};*/
-
-	//const int pointsPerQuad = 3 * 3 * 2;
-	//const int positionLength = pointsPerQuad * 6;
-	//float positions[positionLength];
-
-	//static const GLfloat g_vertex_buffer_data[] = {
-	//-1.0f,-1.0f,-1.0f, // triangle 1 : begin
-	//-1.0f,-1.0f, 1.0f,
-	//-1.0f, 1.0f, 1.0f, // triangle 1 : end
-	//1.0f, 1.0f,-1.0f, // triangle 2 : begin
-	//-1.0f,-1.0f,-1.0f,
-	//-1.0f, 1.0f,-1.0f, // triangle 2 : end
-	//1.0f,-1.0f, 1.0f,
-	//-1.0f,-1.0f,-1.0f,
-	//1.0f,-1.0f,-1.0f,
-	//1.0f, 1.0f,-1.0f,
-	//1.0f,-1.0f,-1.0f,
-	//-1.0f,-1.0f,-1.0f,
-	//-1.0f,-1.0f,-1.0f,
-	//-1.0f, 1.0f, 1.0f,
-	//-1.0f, 1.0f,-1.0f,
-	//1.0f,-1.0f, 1.0f,
-	//-1.0f,-1.0f, 1.0f,
-	//-1.0f,-1.0f,-1.0f,
-	//-1.0f, 1.0f, 1.0f,
-	//-1.0f,-1.0f, 1.0f,
-	//1.0f,-1.0f, 1.0f,
-	//1.0f, 1.0f, 1.0f,
-	//1.0f,-1.0f,-1.0f,
-	//1.0f, 1.0f,-1.0f,
-	//1.0f,-1.0f,-1.0f,
-	//1.0f, 1.0f, 1.0f,
-	//1.0f,-1.0f, 1.0f,
-	//1.0f, 1.0f, 1.0f,
-	//1.0f, 1.0f,-1.0f,
-	//-1.0f, 1.0f,-1.0f,
-	//1.0f, 1.0f, 1.0f,
-	//-1.0f, 1.0f,-1.0f,
-	//-1.0f, 1.0f, 1.0f,
-	//1.0f, 1.0f, 1.0f,
-	//-1.0f, 1.0f, 1.0f,
-	//1.0f,-1.0f, 1.0f
-	//};
 
 	static const GLfloat positions[] = {
 	-1.0, -1.0,  1.0,
@@ -148,110 +110,6 @@ void BoundingBox::generateMesh(void) {
 	glEnableVertexAttribArray(0); 
 	glVertexAttribPointer(0, 3, GL_FLOAT, false /*normalized*/, 0 /*stride*/, 0 /*offset*/); 
 
-	//const float colors[8 * 3] = {
-	//	//   R     G     B
-	//	1.0f, 0.0f, 0.0f, 
-	//	0.0f, 1.0f, 0.0f, 
-	//	0.0f, 0.0f, 1.0f,
-	//	1.0f, 0.0f, 0.0f,
-	//	0.0f, 1.0f, 0.0f,
-	//	0.0f, 0.0f, 1.0f,
-	//	1.0f, 0.0f, 0.0f,
-	//	0.0f, 1.0f, 0.0f
-	//};
-
-	//glGenBuffers(1, &m_colorBuffer);
-	//glBindBuffer(GL_ARRAY_BUFFER, m_colorBuffer);
-	//glBufferData(GL_ARRAY_BUFFER, sizeof(colors), colors, GL_STATIC_DRAW);
-	//glVertexAttribPointer(1, 3, GL_FLOAT, false /*normalized*/, 0 /*stride*/, 0 /*offset*/); 
-	//glEnableVertexAttribArray(1);
-
-	/*static const GLfloat texcoords[] = {
-
-		0.5f, 0.5f,
-		0.5f, 0.5f,
-		0.5f, 0.5f,
-
-		0.0f, 0.0f,
-		1.0f, 1.0f,
-		1.0f, 0.0f,
-
-		0.0f, 0.0f,
-		0.0f, 0.0f,
-		0.0f, 0.0f,
-
-		0.0f, 0.0f,
-		0.0f, 1.0f,
-		1.0f, 1.0f,
-
-		0.0f, 0.0f,
-		0.0f, 0.0f,
-		0.0f, 0.0f,
-
-		0.0f, 0.0f,
-		0.0f, 0.0f,
-		0.0f, 0.0f,
-
-		0.0f, 0.0f,
-		0.0f, 0.0f,
-		0.0f, 0.0f,
-
-		0.0f, 0.0f,
-		0.0f, 0.0f,
-		0.0f, 0.0f,
-
-		0.0f, 0.0f,
-		0.0f, 0.0f,
-		0.0f, 0.0f,
-
-		0.0f, 0.0f,
-		0.0f, 0.0f,
-		0.0f, 0.0f,
-
-		0.0f, 0.0f,
-		0.0f, 0.0f,
-		0.0f, 0.0f,
-
-		0.0f, 0.0f,
-		0.0f, 0.0f,
-		0.0f, 0.0f,
-
-	};*/
-
-	//const float texcoords[8 * 3] = {
-	//	//   R     G     B
-	//	0.0f, 0.0f,
-	//	0.0f, 1.0f,
-	//	1.0f, 1.0f,
-	//	1.0f, 0.0f,
-	//	0.0f, 0.0f,
-	//	0.0f, 1.0f,
-	//	1.0f, 1.0f,
-	//	1.0f, 0.0f,
-	//};
-
-	//glGenBuffers(1, &m_texBuffer);
-	//glBindBuffer(GL_ARRAY_BUFFER, m_texBuffer);
-	//glBufferData(GL_ARRAY_BUFFER, sizeof(texcoords), texcoords, GL_STATIC_DRAW);
-	//glVertexAttribPointer(2, 2, GL_FLOAT, false /*normalized*/, 0 /*stride*/, 0 /*offset*/);
-	//glEnableVertexAttribArray(2);
-	
-
-
-	/*int indices[3 * 2 * 6] = {
-		0, 1, 2,
-		0, 2, 3,
-		4, 6, 5,
-		4, 7, 6,
-		1, 6, 2,
-		1, 5, 6,
-		2, 7, 3,
-		2, 6, 7,
-		0, 7, 4,
-		0, 3, 7,
-		0, 4, 5,
-		0, 5, 1,
-	};*/
 
 	static const GLushort indices[] = {
 	0, 1, 2, 3, 7, 1, 5, 4, 7, 6, 2, 4, 0, 1
@@ -261,11 +119,6 @@ void BoundingBox::generateMesh(void) {
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_indexBuffer);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
-
-
-	
-	
-	
 	
 }
 
@@ -276,17 +129,18 @@ void BoundingBox::generateVolumeTex(void) {
 	//printf("%d %d %d", m_num_cells.x, m_num_cells.y, m_num_cells.z);
 	//printf("tot len: %d", m_num_cells.x * m_num_cells.y * m_num_cells.z);
 
-	for (int x = 0; x < m_num_cells.x; x++) {
+	/*for (int x = 0; x < m_num_cells.x; x++) {
 		for (int y = 0; y < m_num_cells.y; y++) {
 			for (int z = 0; z < m_num_cells.z; z++) {
 				if ((x == 0 || x == m_num_cells.x - 1) && (y == 0 || y == m_num_cells.y - 1) && (z == 0 || z == m_num_cells.z - 1)) {
 					m_grid[x + y * m_num_cells.x + z * m_num_cells.x * m_num_cells.y] = 1.0f;
 				}
-				if(x==y)
+				else if(x==y)
 					m_grid[x + y * m_num_cells.x + z * m_num_cells.x * m_num_cells.y] = 1.0f;
+
 			}
 		}
-	}
+	}*/
 
 
 
@@ -300,7 +154,7 @@ void BoundingBox::generateVolumeTex(void) {
 	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
-	glTexImage3D(GL_TEXTURE_3D, 0, GL_R32F, m_num_cells.x, m_num_cells.y, m_num_cells.z, 0, GL_RED, GL_FLOAT, &m_grid[0]);
+	glTexImage3D(GL_TEXTURE_3D, 0, GL_R32F, m_num_cells.x, m_num_cells.y, m_num_cells.z, 0, GL_RED, GL_FLOAT, m_grid.data());
 
 }
 
@@ -324,8 +178,27 @@ void BoundingBox::uppdateVolumeTexture() {
 	}*/
 
 	glBindTexture(GL_TEXTURE_3D, m_gridTex);
-	glTexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, 0, m_num_cells.x, m_num_cells.y, m_num_cells.z, GL_RED, GL_FLOAT, &m_grid[0]);
+	glTexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, 0, m_num_cells.x, m_num_cells.y, m_num_cells.z, GL_RED, GL_FLOAT, m_grid.data());
 
+}
+
+void BoundingBox::updateVolume(float dt) {
+	int x = 4;
+	int y = 4; 
+	int z = 4;
+	simulate(m_grid.data(), dt);
+
+	/*for (int x = 0; x < m_num_cells.x; x++) {
+		for (int y = 0; y < m_num_cells.y; y++) {
+			for (int z = 0; z < m_num_cells.z; z++) {
+				if (m_grid[x + y * m_num_cells.x + z * m_num_cells.x * m_num_cells.y] < 0.0f) printf("negative: x:%d y:%d z:%d, value: %f \n", x, y, z, m_grid[x + y * m_num_cells.x + z * m_num_cells.x * m_num_cells.y]);
+			}
+		}
+	}*/
+	printf("------- \n");
+	//printf("first val %f", m_grid[x + y * m_num_cells.x + z * m_num_cells.x * m_num_cells.y]);
+	//printf("float: %d", sizeof(float));
+	uppdateVolumeTexture();
 }
 
 void addQuadPoints(float positions[], int offset, vec3 p0, vec3 p1, vec3 p2, vec3 p3) {
@@ -349,6 +222,8 @@ void addQuadPoints(float positions[], int offset, vec3 p0, vec3 p1, vec3 p2, vec
 void BoundingBox::freeGrid(void) {
 	//free(m_grid);
 	m_grid.clear();
+	deleteVolume();
+	printf("volume cleared");
 }
 
 

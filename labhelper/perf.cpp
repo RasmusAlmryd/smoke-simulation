@@ -18,7 +18,7 @@
 #include "labhelper.h"
 
 #define LOG_FATAL(s) fatal_error(s)
-
+//#define CHAG_USE_CUDA
 
 namespace labhelper
 {
