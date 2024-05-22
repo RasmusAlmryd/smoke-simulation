@@ -22,7 +22,7 @@ float* dev_p;
 
 float gravity = -9.82; // m/s^2
 
-#define OVER_RELAXATION 1;
+#define OVER_RELAXATION 1.3;
 
 void getGPUProperties() {
 	//Discover GPU attributes
@@ -132,7 +132,7 @@ void initializeVolume(float* smoke_grid, unsigned int width, unsigned int heigth
 	for (int x = 0; x < width; x++) {
 		for (int z = 0; z < depth; z++) {
 			int y = 0;
-			s_host[x + y * width + z * width * heigth] = 1;
+			s_host[x + y * width + z * width * heigth] = 0;
 		}
 	}
 
@@ -255,6 +255,50 @@ __global__ void diverge(float* u, float* v, float* w, float* p, bool* s, uint3 n
 	}
 }
 
+//staggered for 
+__global__ void divergenceTemp(float* u, float* v, float* w, bool* s, uint3 normalDim, uint3 staggeredDim, char offset) {
+
+	int x = threadIdx.x + blockDim.x * blockIdx.x + 1;
+	int y = threadIdx.y + blockDim.y * blockIdx.y + 1;
+	int z = threadIdx.z + blockDim.z * blockIdx.z + 1;
+
+	x = x * 2 - (y + z + offset) % 2;
+
+	if (x < normalDim.x - 1 && y < normalDim.y - 1 && z < normalDim.z - 1) {
+		if (s[x + y * normalDim.x + z * normalDim.x * normalDim.y] == 0)
+			return;
+
+		int acc_s = 0;
+		int sx1 = s[(x + 1) + y * normalDim.x + z * normalDim.x * normalDim.y];
+		int sx0 = s[(x - 1) + y * normalDim.x + z * normalDim.x * normalDim.y];
+		int sy1 = s[x + (y + 1) * normalDim.x + z * normalDim.x * normalDim.y];
+		int sy0 = s[x + (y - 1) * normalDim.x + z * normalDim.x * normalDim.y];
+		int sz1 = s[x + y * normalDim.x + (z + 1) * normalDim.x * normalDim.y];
+		int sz0 = s[x + y * normalDim.x + (z - 1) * normalDim.x * normalDim.y];
+		acc_s = sx0 + sx1 + sy0 + sy1 + sz0 + sz1;
+
+		if (acc_s == 0) return;
+
+		float div = -u[(x)+y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] + u[(x + 1) + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] +
+			-v[x + (y)*staggeredDim.x + z * staggeredDim.x * staggeredDim.y] + v[x + (y + 1) * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] +
+			-w[x + y * staggeredDim.x + (z)*staggeredDim.x * staggeredDim.y] + w[x + y * staggeredDim.x + (z + 1) * staggeredDim.x * staggeredDim.y];
+
+		/*div /= acc_s;
+		div *= OVER_RELAXATION;*/
+
+		float p_t = (-div / acc_s) * OVER_RELAXATION;
+		//p[x + y * normalDim.x + z * normalDim.x * normalDim.y] = p_t;
+
+		u[(x + 0) + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] -= (p_t * sx0);
+		u[(x + 1) + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] += (p_t * sx1);
+		v[x + (y + 0) * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] -= (p_t * sy0);
+		v[x + (y + 1) * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] += (p_t * sy1);
+		w[x + y * staggeredDim.x + (z + 0) * staggeredDim.x * staggeredDim.y] -= (p_t * sz0);
+		w[x + y * staggeredDim.x + (z + 1) * staggeredDim.x * staggeredDim.y] += (p_t * sz1);
+
+	}
+}
+
 __global__ void extrapolate(float* u, float* v, float* w, uint3 normalDim, uint3 staggeredDim) {
 	int x = threadIdx.x + blockDim.x * blockIdx.x;
 	int y = threadIdx.y + blockDim.y * blockIdx.y;
@@ -310,7 +354,7 @@ __device__ float avgW(float* vel, int x, int y, int z, uint3 staggeredDim) {
 
 
 
-__device__ float sampleField(float* field, uint3 gridDim, float3 pos, float3 delta, uint3 normalDim) {
+__device__ float sampleSmoke(float* field, uint3 gridDim, float3 pos, float3 delta, uint3 normalDim) {
 	
 	float x = fmaxf(fminf(pos.x, normalDim.x-1), 1);
 	float y = fmaxf(fminf(pos.y, normalDim.y-1), 1);
@@ -345,6 +389,41 @@ __device__ float sampleField(float* field, uint3 gridDim, float3 pos, float3 del
 
 }
 
+__device__ float sampleVelocity(float* field, uint3 gridDim, float3 pos, float3 delta, uint3 normalDim) {
+
+	float x = fmaxf(fminf(pos.x, gridDim.x - 1), 1);
+	float y = fmaxf(fminf(pos.y, gridDim.y - 1), 1);
+	float z = fmaxf(fminf(pos.z, gridDim.z - 1), 1);
+
+	//interpelation
+	int x0 = (int)fminf(floorf(x - delta.x), gridDim.x - 1);
+	float xw1 = (x - delta.x) - x0;
+	float xw0 = 1 - xw1;
+	int x1 = (int)fminf(x0 + 1, gridDim.x - 1);
+
+	int y0 = (int)fminf(floorf(y - delta.y), gridDim.y - 1);
+	float yw1 = (y - delta.y) - y0;
+	float yw0 = 1 - yw1;
+	int y1 = (int)fminf(y0 + 1, gridDim.y - 1);
+
+	int z0 = (int)fminf(floorf(z - delta.z), gridDim.z - 1);
+	float zw1 = (z - delta.z) - z0;
+	float zw0 = 1 - zw1;
+	int z1 = (int)fminf(z0 + 1, gridDim.z - 1);
+
+	return
+		xw0 * yw0 * zw0 * field[x0 + y0 * gridDim.x + z0 * gridDim.x * gridDim.y] +
+		xw1 * yw0 * zw0 * field[x1 + y0 * gridDim.x + z0 * gridDim.x * gridDim.y] +
+		xw0 * yw1 * zw0 * field[x0 + y1 * gridDim.x + z0 * gridDim.x * gridDim.y] +
+		xw1 * yw1 * zw0 * field[x1 + y1 * gridDim.x + z0 * gridDim.x * gridDim.y] +
+		xw0 * yw0 * zw1 * field[x0 + y0 * gridDim.x + z1 * gridDim.x * gridDim.y] +
+		xw1 * yw0 * zw1 * field[x1 + y0 * gridDim.x + z1 * gridDim.x * gridDim.y] +
+		xw0 * yw1 * zw1 * field[x0 + y1 * gridDim.x + z1 * gridDim.x * gridDim.y] +
+		xw1 * yw1 * zw1 * field[x1 + y1 * gridDim.x + z1 * gridDim.x * gridDim.y];
+
+
+}
+
 
 
 
@@ -372,7 +451,7 @@ __global__ void velocityAdvectionU(float *u0, float *u1, float *v0, float *w0, b
 			float3 pos = { x_t, y_t, z_t };
 			float3 delta = { 0, 0.5, 0.5 };
 
-			float newU = sampleField(u0, staggeredDim, pos, delta, normalDim);
+			float newU = sampleSmoke(u0, staggeredDim, pos, delta, normalDim);
 			u1[x + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] = newU;
 
 		}
@@ -387,8 +466,8 @@ __global__ void velocityAdvectionV(float* v0, float* v1, float* u0, float* w0, b
 	if (x < normalDim.x-1 && y < normalDim.y && z < normalDim.z - 1) {
 
 		if (s[x + y * normalDim.x + z * normalDim.x * normalDim.y] != 0 && s[x + (y-1) * normalDim.x + z * normalDim.x * normalDim.y] != 0) {
-			float x_t = x;
-			float y_t = y + 0.5;
+			float x_t = x + 0.5;
+			float y_t = y;
 			float z_t = z + 0.5;
 
 			float u = avgU(u0, x, y, z, staggeredDim);
@@ -402,7 +481,7 @@ __global__ void velocityAdvectionV(float* v0, float* v1, float* u0, float* w0, b
 			float3 pos = { x_t, y_t, z_t };
 			float3 delta = { 0.5, 0, 0.5 };
 
-			float newU = sampleField(v0, staggeredDim, pos, delta, normalDim);
+			float newU = sampleSmoke(v0, staggeredDim, pos, delta, normalDim);
 			v1[x + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] = newU;
 
 		}
@@ -417,9 +496,9 @@ __global__ void velocityAdvectionW(float* w0, float* w1, float* u0, float* v0, b
 	if (x < normalDim.x - 1 && y < normalDim.y - 1 && z < normalDim.z) {
 
 		if (s[x + y * normalDim.x + z * normalDim.x * normalDim.y] != 0 && s[x + y * normalDim.x + (z-1) * normalDim.x * normalDim.y] != 0) {
-			float x_t = x;
+			float x_t = x + 0.5;
 			float y_t = y + 0.5;
-			float z_t = z + 0.5;
+			float z_t = z;
 
 			float u = avgU(u0, x, y, z, staggeredDim);
 			float v = avgV(v0, x, y, z, staggeredDim);
@@ -432,7 +511,7 @@ __global__ void velocityAdvectionW(float* w0, float* w1, float* u0, float* v0, b
 			float3 pos = { x_t, y_t, z_t };
 			float3 delta = { 0.5, 0.5, 0 };
 
-			float newU = sampleField(w0, staggeredDim, pos, delta, normalDim);
+			float newU = sampleSmoke(w0, staggeredDim, pos, delta, normalDim);
 			w1[x + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] = newU;
 
 		}
@@ -450,17 +529,17 @@ __global__ void advectSmoke(float* smoke0, float *smoke1, float* u, float* v, fl
 			float v_t = (v[x + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] + v[x + (y + 1) * staggeredDim.x + z * staggeredDim.x * staggeredDim.y]) / 2;
 			float w_t = (w[x + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] + w[x + y * staggeredDim.x + (z + 1) * staggeredDim.x * staggeredDim.y]) / 2;
 
-			/*float x_t = x + 0.5 - u_t * dt;
+			float x_t = x + 0.5 - u_t * dt;
 			float y_t = y + 0.5 - v_t * dt;
-			float z_t = z + 0.5 - w_t * dt;*/
-			float x_t = x + 0.5 ;
+			float z_t = z + 0.5 - w_t * dt;
+			/*float x_t = x + 0.5 ;
 			float y_t = y + 0.5 + 1;
-			float z_t = z + 0.5 ;
+			float z_t = z + 0.5 ;*/
 
 			float3 pos = { x_t, y_t, z_t };
 			float3 delta = { 0.5, 0.5, 0.5 };
 
-			smoke1[x + y * normalDim.x + z * normalDim.x * normalDim.y] = sampleField(smoke0, normalDim, pos, delta, normalDim); //smoke0[x + (y+1) * normalDim.x + z * normalDim.x * normalDim.y];
+			smoke1[x + y * normalDim.x + z * normalDim.x * normalDim.y] = sampleSmoke(smoke0, normalDim, pos, delta, normalDim); //smoke0[x + (y+1) * normalDim.x + z * normalDim.x * normalDim.y];
 		}
 	}
 }
@@ -548,14 +627,23 @@ void simulate(float* smoke_grid, float dt) {
 		diverge << <dimGrid, dimBlock >> > (dev_u[smokeIndex], dev_v[smokeIndex], dev_w[smokeIndex], dev_p, dev_s, smokeDim, smokeStaggeredDim);
 	}*/
 
-	/*velocityAdvectionU << <dimGrid, dimBlock >> > (dev_u[tempIndexNow], dev_u[tempIndexPast], dev_v[tempIndexNow], dev_w[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, dt);
+	dim3 divdimBlock(8, 8, 8); //512 
+	dim3 divdimGrid(ceil(ceil(smokeDim.x / 2.0) / 8.0), ceil(smokeDim.y / 8.0), ceil(smokeDim.z / 8.0));
+	int num_iterations = 50;
+	for (int i = 0; i < num_iterations; i++) {
+		divergenceTemp << <divdimGrid, divdimBlock >> > (dev_u[tempIndexNow], dev_v[tempIndexNow], dev_w[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, 0);
+		divergenceTemp << <divdimGrid, divdimBlock >> > (dev_u[tempIndexNow], dev_v[tempIndexNow], dev_w[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, 1);
+	}
+
+
+	velocityAdvectionU << <dimGrid, dimBlock >> > (dev_u[tempIndexNow], dev_u[tempIndexPast], dev_v[tempIndexNow], dev_w[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, dt);
 	velocityAdvectionV << <dimGrid, dimBlock >> > (dev_v[tempIndexNow], dev_v[tempIndexPast], dev_u[tempIndexNow], dev_w[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, dt);
-	velocityAdvectionW << <dimGrid, dimBlock >> > (dev_w[tempIndexNow], dev_w[tempIndexPast], dev_u[tempIndexNow], dev_v[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, dt);*/
+	velocityAdvectionW << <dimGrid, dimBlock >> > (dev_w[tempIndexNow], dev_w[tempIndexPast], dev_u[tempIndexNow], dev_v[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, dt);
 
-	advectSmoke << <dimGrid, dimBlock >> > (dev_smoke[tempIndexNow], dev_smoke[tempIndexPast], dev_u[smokeIndex], dev_v[smokeIndex], dev_w[smokeIndex], dev_s, smokeDim, smokeStaggeredDim, dt);
+	advectSmoke << <dimGrid, dimBlock >> > (dev_smoke[tempIndexNow], dev_smoke[tempIndexPast], dev_u[tempIndexPast], dev_v[tempIndexPast], dev_w[tempIndexPast], dev_s, smokeDim, smokeStaggeredDim, dt);
 
-	uint3 dir = { 0,1,0 };
-	//visualizeV << <dimGrid, dimBlock >> > (dev_v[smokeIndex], dev_smoke[smokeIndex], smokeDim, smokeStaggeredDim, dir);
+	uint3 dir = { 0,0,1 };
+	//visualizeV << <dimGrid, dimBlock >> > (dev_w[tempIndexPast], dev_smoke[smokeIndex], smokeDim, smokeStaggeredDim, dir);
 	//visualizeS << <dimGrid, dimBlock >> > (dev_s, dev_smoke[smokeIndex], smokeDim, smokeStaggeredDim);
 	//visualizeP << <dimGrid, dimBlock >> > (dev_p, dev_smoke[smokeIndex], smokeDim, smokeStaggeredDim);
 

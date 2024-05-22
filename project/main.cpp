@@ -53,6 +53,7 @@ GLuint simpleShaderProgram; // Shader used to draw the shadow map
 GLuint backgroundProgram;
 GLuint boundingShaderProgram;
 GLuint volumeShaderProgram;
+GLuint texVolumeShaderProgram;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Environment
@@ -72,11 +73,13 @@ float point_light_intensity_multiplier = 10000.0f;
 ///////////////////////////////////////////////////////////////////////////////
 // BoundingBox
 ///////////////////////////////////////////////////////////////////////////////
-IntVec3 num_cells = { 16,16,16 };
+IntVec3 num_cells = { 24,24, 24 };
 BoundingBox boundingBox(vec3(0,0,0), num_cells, 1);
 
 GLuint gridTex;
-
+float simDeltaTime = 0.0f;
+bool simRunning = false;
+ 
 ///////////////////////////////////////////////////////////////////////////////
 // Camera parameters.
 ///////////////////////////////////////////////////////////////////////////////
@@ -130,6 +133,13 @@ void loadShaders(bool is_reload)
 	{
 		std::cout << "shader" << std::endl;
 		volumeShaderProgram = shader;
+	}
+
+	shader = labhelper::loadShaderProgram("../project/texVolume.vert", "../project/texVolume.frag", is_reload);
+	if (shader != 0)
+	{
+		std::cout << "shader" << std::endl;
+		texVolumeShaderProgram = shader;
 	}
 }
 
@@ -210,6 +220,26 @@ void drawVolume(const mat4& viewMatrix, const mat4& projectionMatrix) {
 
 	boundingBox.submitTriangles(); 
 	glDisable(GL_BLEND);
+}
+
+void drawTexVolume(const mat4& viewMatrix, const mat4& projectionMatrix) {
+	glUseProgram(texVolumeShaderProgram);
+	glEnable(GL_BLEND);
+	glDisable(GL_CULL_FACE); 
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	labhelper::setUniformSlow(texVolumeShaderProgram, "modelViewProjectionMatrix", projectionMatrix * viewMatrix);
+
+	//labhelper::setUniformSlow(volumeShaderProgram, "modelViewMatrix", viewMatrix * boundingBox.m_modelMatrix);
+	//labhelper::setUniformSlow(volumeShaderProgram, "camera_pos", cameraPosition);
+
+
+	glActiveTexture(GL_TEXTURE8);
+	glBindTexture(GL_TEXTURE_3D, boundingBox.m_gridTex);
+
+	boundingBox.submitProxyGeometry();
+	glDisable(GL_BLEND);
+	glEnable(GL_CULL_FACE); 
 }
 
 void drawBoundingBox(const mat4& viewMatrix, const mat4& projectionMatrix) {
@@ -337,11 +367,12 @@ void display(void)
 	}
 	{
 		labhelper::perf::Scope s("volume");
-		drawVolume(viewMatrix, projMatrix); 
+		//drawVolume(viewMatrix, projMatrix); 
 	}
 
 	if (debug) {
-		drawBoundingBox(viewMatrix, projMatrix);
+		//drawBoundingBox(viewMatrix, projMatrix);
+		drawTexVolume(viewMatrix, projMatrix);
 		debugDrawLight(viewMatrix, projMatrix, vec3(lightPosition));
 	}
 
@@ -353,6 +384,7 @@ void display(void)
 ///////////////////////////////////////////////////////////////////////////////
 bool handleEvents(void)
 {
+	labhelper::perf::Scope s("Events");
 	// check events (keyboard among other)
 	SDL_Event event;
 	bool quitEvent = false;
@@ -379,20 +411,13 @@ bool handleEvents(void)
 			debug = !debug;
 		}
 		if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_u) {
-			printf("update!");
-			////boundingBox.uppdateVolumeTexture();
-			//std::vector<int> size_grid(3);
-			//size_grid[0] = num_cells.x;
-			//size_grid[1] = num_cells.y;
-			//size_grid[2] = num_cells.z;
-			////std::vector<float> temp_grid(size_grid[0]* size_grid[1]* size_grid[2], 0.0f);
-			////printf("%f \n", boundingBox.m_grid[27]);
-			//
-			//updateGrid(boundingBox.m_grid.data(), size_grid, 0.1f);
-			//printf("%f \n", boundingBox.m_grid[27]);
 			float dt = 0.01f;
 			boundingBox.updateVolume(dt);
 
+		}
+		if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_r) {
+			simRunning = !simRunning;
+			printf("start sim: %d\n", simRunning);
 		}
 		if(event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT
 		   && (!labhelper::isGUIvisible() || !ImGui::GetIO().WantCaptureMouse))
@@ -462,9 +487,10 @@ bool handleEvents(void)
 ///////////////////////////////////////////////////////////////////////////////
 void gui()
 {
+
 	// ----------------- Set variables --------------------------
-	ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate,
-	            ImGui::GetIO().Framerate);
+	ImGui::Text("Application average %.3f ms/frame (%.1f FPS) , ACTUAL: %.3f", 1000.0f / ImGui::GetIO().Framerate,
+	            ImGui::GetIO().Framerate, deltaTime);
 	// ----------------------------------------------------------
 
 
@@ -492,6 +518,8 @@ int main(int argc, char* argv[])
 		previousTime = currentTime;
 		currentTime = timeSinceStart.count();
 		deltaTime = currentTime - previousTime;
+		if (simRunning) simDeltaTime += deltaTime;
+		else simDeltaTime = 0.0f;
 
 		// check events (keyboard among other)
 		stopRendering = handleEvents();
@@ -501,9 +529,23 @@ int main(int argc, char* argv[])
 
 		// render to window
 		display();
+		
 
 		// Render overlay GUI.
 		gui();
+
+
+		// Update simulation
+		{
+			labhelper::perf::Scope s("Simulation");
+			if (simDeltaTime > (1.0f / 10.0f) && simRunning) {
+				printf("sim! dt: %f \n", simDeltaTime);
+				
+				boundingBox.updateVolume(simDeltaTime);
+				simDeltaTime = 0.0f;
+			}
+		}
+
 
 		// Finish the frame and render the GUI
 		labhelper::finishFrame();
