@@ -21,6 +21,9 @@ BoundingBox::BoundingBox(vec3 position, IntVec3 num_cells, int cell_size)
 	, m_colorBuffer(UINT32_MAX)
 	, m_texBuffer(UINT32_MAX)
 	, m_gridTex(UINT32_MAX)
+	, m_proxy_vao(UINT32_MAX)
+	, m_proxy_indexBuffer(UINT32_MAX)
+	, m_proxy_positionBuffer(UINT32_MAX)
 {
 	m_cell_size = cell_size;
 	m_num_cells = { 0,0,0 };
@@ -112,7 +115,7 @@ void BoundingBox::generateMesh(void) {
 	1.0,  1.0, -1.0,
 	};*/
 
-	vec3 box_positions[8] = {
+	const vec3 box_positions[8] = {
 		vec3(-1.0, -1.0,  1.0),
 		vec3(1.0, -1.0,  1.0),
 		vec3(-1.0,  1.0,  1.0),
@@ -148,37 +151,36 @@ void BoundingBox::generateMesh(void) {
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_indexBuffer);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
+	
 
+	
+}
 
-	//Proxy Geometry 
-	vec3 inRayOrigin = vec3(-20, -20, -20);
-	vec3 inRayDirection = vec3(1, 1, 2);
+void BoundingBox::generateProxyGeometry(std::vector<vec3>& vertices, std::vector<short>& indices, vec3 viewOrigin, vec3 viewDirection) {
+
+	vec3 inRayOrigin = viewOrigin;
+	vec3 inRayDirection = viewDirection;
 	inRayDirection = normalize(inRayDirection);
-	/*std::vector<vec3> points = planeBoxIntersections(m_position, m_dimensions, inRayOrigin+inRayDirection*, inRayOrigin);*/
-	int steps = 10;
+
+	int steps = 50;
 	float minDist;
 	float maxDist;
 
-	for (int i = 0; i < 8; i++) {
-		box_positions[i] = box_positions[i] * m_dimensions/2.0f;
-	}
+	const vec3 box_positions[8] = {
+		vec3(-1.0, -1.0,  1.0) * m_dimensions / 2.0f,
+		vec3(1.0, -1.0,  1.0) * m_dimensions / 2.0f,
+		vec3(-1.0,  1.0,  1.0) * m_dimensions / 2.0f,
+		vec3(1.0,  1.0,  1.0) * m_dimensions / 2.0f,
+		vec3(-1.0, -1.0, -1.0) * m_dimensions / 2.0f,
+		vec3(1.0, -1.0, -1.0) * m_dimensions / 2.0f,
+		vec3(-1.0,  1.0, -1.0) * m_dimensions / 2.0f,
+		vec3(1.0,  1.0, -1.0) * m_dimensions / 2.0f,
+	};
+
 	getMinMaxPoints(minDist, maxDist, box_positions, m_dimensions, inRayOrigin, inRayDirection);
 
-	//vec3 minPos(-m_dimensions.x / 2, 0, 0);
-	//vec3 maxPos(m_dimensions.x / 2, 0, 0);
-
-	std::vector<vec3> points;
-	std::vector<short> triangleIndices;
-
-
-	printf("min position | d: %f \n", minDist);
-	printf("max position | d: %f\n", maxDist);
-
-	vec3 start = inRayOrigin + inRayDirection * minDist; 
+	vec3 start = inRayOrigin + inRayDirection * minDist;
 	vec3 end = inRayOrigin + inRayDirection * maxDist;
-	printf("start | x: %f  y: %f  z: %f \n", start.x, start.y, start.z);
-	printf("end | x: %f  y: %f  z: %f \n", end.x, end.y, end.z);
-
 
 
 	for (float step = 0.5; step < steps; step++) {
@@ -186,51 +188,66 @@ void BoundingBox::generateMesh(void) {
 
 		vec3 planePos = start + (end - start) * t;
 		std::vector<vec3> newPoints = planeBoxIntersections(m_position, m_dimensions, planePos, inRayDirection);
-		
+
 
 		sortPoints(newPoints, newPoints.size() - 1, newPoints[newPoints.size() - 1], inRayDirection);
 
 
-		std::vector<short> newIndices = teselate(newPoints, points.size()); 
+		std::vector<short> newIndices = teselate(newPoints, vertices.size());
 
-		points.insert(points.end(), newPoints.begin(), newPoints.end());
+		vertices.insert(vertices.end(), newPoints.begin(), newPoints.end());
 		newPoints.clear();
 
-		triangleIndices.insert(triangleIndices.end(), newIndices.begin(), newIndices.end());
-		newIndices.clear(); 
+		indices.insert(indices.end(), newIndices.begin(), newIndices.end());
+		newIndices.clear();
 
 	}
+}
 
+
+void BoundingBox::initProxyGeometry(vec3 viewOrigin, vec3 viewDirection) {
+	
+	std::vector<vec3> vertices;
+	std::vector<short> triangleIndices;
+
+	generateProxyGeometry(vertices, triangleIndices, viewOrigin, viewDirection);
 
 	m_num_proxy_triangles = triangleIndices.size() / 3;
 
-	// Create a handle for the vertex array object
 	glGenVertexArrays(1, &m_proxy_vao);
-	// Set it as current, i.e., related calls will affect this object
-	glBindVertexArray(m_proxy_vao);
+	glBindVertexArray(m_proxy_vao); 
 
 
-	// Create a handle for the vertex position buffer
 	glGenBuffers(1, &m_proxy_positionBuffer);
-	// Set the newly created buffer as the current one
 	glBindBuffer(GL_ARRAY_BUFFER, m_proxy_positionBuffer);
-	// Send the vetex position data to the current buffer
-	glBufferData(GL_ARRAY_BUFFER, points.size() * sizeof(vec3), points.data(), GL_STATIC_DRAW);
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 3, GL_FLOAT, false /*normalized*/, 0 /*stride*/, 0 /*offset*/);
+	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(vec3), vertices.data(), GL_STATIC_DRAW); 
+	glEnableVertexAttribArray(0); 
+	glVertexAttribPointer(0, 3, GL_FLOAT, false /*normalized*/, 0 /*stride*/, 0 /*offset*/); 
 
-	
 
-	glGenBuffers(1, &m_proxy_indexBuffer);
+
+	glGenBuffers(1, &m_proxy_indexBuffer); 
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_proxy_indexBuffer); 
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, triangleIndices.size() * sizeof(short), triangleIndices.data(), GL_STATIC_DRAW); 
+}
+
+void BoundingBox::updateProxyGeometry(vec3 viewOrigin, vec3 viewDirection) {
+	std::vector<vec3> vertices; 
+	std::vector<short> triangleIndices; 
+
+	generateProxyGeometry(vertices, triangleIndices, viewOrigin, viewDirection); 
+
+	m_num_proxy_triangles = triangleIndices.size() / 3; 
+
+
+	glBindBuffer(GL_ARRAY_BUFFER, m_proxy_positionBuffer); 
+	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(vec3), vertices.data(), GL_STATIC_DRAW); 
+
+ 
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_proxy_indexBuffer);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, triangleIndices.size() * sizeof(short), triangleIndices.data(), GL_STATIC_DRAW);
-
-	
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, triangleIndices.size() * sizeof(short), triangleIndices.data(), GL_STATIC_DRAW); 
 }
 
-void BoundingBox::generateProxyGeometry(vec3 viewOrigin, vec3 viewDirection) {
-
-}
 
 void getMinMaxPoints(float &min, float &max, const vec3 points[8], vec3 boxSize, vec3 vievOrigin, vec3 viewDir) {
 	 
@@ -285,7 +302,7 @@ void sortPoints(std::vector<vec3> &points, int numPoints, vec3 planeOrigin, vec3
 
 bool rayPlaneIntersection(vec3 &intersectionPoint, vec3 rayOrigin, vec3 rayDir, float max_t, vec3 planeOrigin, vec3 planeNormal) {
 
-	if (dot(rayDir, planeNormal) < 0.001) return false;
+	//if (dot(rayDir, planeNormal) < 0.001) return false;
 	 
 	float t = dot((planeOrigin - rayOrigin), planeNormal) / dot(rayDir, planeNormal);
 	if (t > max_t || t < 0) return false;

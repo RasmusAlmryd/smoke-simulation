@@ -79,6 +79,9 @@ BoundingBox boundingBox(vec3(0,0,0), num_cells, 1);
 GLuint gridTex;
 float simDeltaTime = 0.0f;
 bool simRunning = false;
+
+bool proxy_active = false;
+bool proxy_update = false;
  
 ///////////////////////////////////////////////////////////////////////////////
 // Camera parameters.
@@ -87,6 +90,7 @@ bool simRunning = false;
 vec3 cameraPosition(1.0f, 7.0f, 18.0f);
 vec3 cameraDirection = normalize(vec3(0.0f) - cameraPosition);
 float cameraSpeed = 13.f;
+float cameraSpeedBoost = cameraSpeed * 4;
 
 vec3 worldUp(0.0f, 1.0f, 0.0f);
 
@@ -175,7 +179,9 @@ void initialize()
 	environmentMap = labhelper::loadHdrTexture("../scenes/envmaps/" + envmap_base_name + ".hdr");
 
 	boundingBox.generateMesh();
+	boundingBox.initProxyGeometry(cameraPosition, cameraDirection);
 	boundingBox.generateVolumeTex();
+
 
 
 	glEnable(GL_DEPTH_TEST); // enable Z-buffering
@@ -370,8 +376,17 @@ void display(void)
 		//drawVolume(viewMatrix, projMatrix); 
 	}
 
+	{
+		labhelper::perf::Scope s("¨proxy"); 
+		if (proxy_active) {
+		
+			boundingBox.updateProxyGeometry(cameraPosition, (boundingBox.m_position-cameraPosition) + (boundingBox.m_position - lightPosition));
+			proxy_update = false;
+		}
+	}
+
 	if (debug) {
-		//drawBoundingBox(viewMatrix, projMatrix);
+		drawBoundingBox(viewMatrix, projMatrix);
 		drawTexVolume(viewMatrix, projMatrix);
 		debugDrawLight(viewMatrix, projMatrix, vec3(lightPosition));
 	}
@@ -415,6 +430,10 @@ bool handleEvents(void)
 			boundingBox.updateVolume(dt);
 
 		}
+		if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_c) {
+			proxy_active = !proxy_active;
+			//boundingBox.updateProxyGeometry(cameraPosition, cameraDirection);
+		}
 		if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_r) {
 			simRunning = !simRunning;
 			printf("start sim: %d\n", simRunning);
@@ -447,37 +466,50 @@ bool handleEvents(void)
 			cameraDirection = vec3(pitch * yaw * vec4(cameraDirection, 0.0f));
 			g_prevMouseCoords.x = event.motion.x;
 			g_prevMouseCoords.y = event.motion.y;
+
+			/*proxy_update = true;*/
 		}
 	}
 
 	// check keyboard state (which keys are still pressed)
 	const uint8_t* state = SDL_GetKeyboardState(nullptr);
 	vec3 cameraRight = cross(cameraDirection, worldUp);
-
+	float currentCameraSpeed = cameraSpeed;
+	if (state[SDL_SCANCODE_LSHIFT])
+	{
+		currentCameraSpeed = cameraSpeedBoost;
+	}
 	if(state[SDL_SCANCODE_W])
 	{
-		cameraPosition += cameraSpeed * deltaTime * cameraDirection;
+		cameraPosition += currentCameraSpeed * deltaTime * cameraDirection;
+		proxy_update = true;
 	}
 	if(state[SDL_SCANCODE_S])
 	{
-		cameraPosition -= cameraSpeed * deltaTime * cameraDirection;
+		cameraPosition -= currentCameraSpeed * deltaTime * cameraDirection;
+		proxy_update = true;
 	}
 	if(state[SDL_SCANCODE_A])
 	{
-		cameraPosition -= cameraSpeed * deltaTime * cameraRight;
+		cameraPosition -= currentCameraSpeed * deltaTime * cameraRight;
+		proxy_update = true;
 	}
 	if(state[SDL_SCANCODE_D])
 	{
-		cameraPosition += cameraSpeed * deltaTime * cameraRight;
+		cameraPosition += currentCameraSpeed * deltaTime * cameraRight;
+		proxy_update = true;
 	}
 	if(state[SDL_SCANCODE_Q])
 	{
-		cameraPosition -= cameraSpeed * deltaTime * worldUp;
+		cameraPosition -= currentCameraSpeed * deltaTime * worldUp;
+		proxy_update = true;
 	}
 	if(state[SDL_SCANCODE_E])
 	{
-		cameraPosition += cameraSpeed * deltaTime * worldUp;
+		cameraPosition += currentCameraSpeed * deltaTime * worldUp;
+		proxy_update = true;
 	}
+
 	return quitEvent;
 }
 
