@@ -73,15 +73,18 @@ float point_light_intensity_multiplier = 10000.0f;
 ///////////////////////////////////////////////////////////////////////////////
 // BoundingBox
 ///////////////////////////////////////////////////////////////////////////////
-IntVec3 num_cells = { 24,24, 24 };
+IntVec3 num_cells = { 48,48,48};
 BoundingBox boundingBox(vec3(0,0,0), num_cells, 1);
 
 GLuint gridTex;
 float simDeltaTime = 0.0f;
 bool simRunning = false;
+const float simUpdatesPerSecond = 20;
 
 bool proxy_active = false;
 bool proxy_update = false;
+
+int count = 0;
  
 ///////////////////////////////////////////////////////////////////////////////
 // Camera parameters.
@@ -228,13 +231,15 @@ void drawVolume(const mat4& viewMatrix, const mat4& projectionMatrix) {
 	glDisable(GL_BLEND);
 }
 
-void drawTexVolume(const mat4& viewMatrix, const mat4& projectionMatrix) {
+void drawTexVolume(const mat4& viewMatrix, const mat4& projectionMatrix, bool backToFront) {
 	glUseProgram(texVolumeShaderProgram);
 	glEnable(GL_BLEND);
 	glDisable(GL_CULL_FACE); 
+	glDisable(GL_DEPTH_TEST);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 	labhelper::setUniformSlow(texVolumeShaderProgram, "modelViewProjectionMatrix", projectionMatrix * viewMatrix);
+	labhelper::setUniformSlow(texVolumeShaderProgram, "volume_pos", boundingBox.m_position);
 
 	//labhelper::setUniformSlow(volumeShaderProgram, "modelViewMatrix", viewMatrix * boundingBox.m_modelMatrix);
 	//labhelper::setUniformSlow(volumeShaderProgram, "camera_pos", cameraPosition);
@@ -244,8 +249,10 @@ void drawTexVolume(const mat4& viewMatrix, const mat4& projectionMatrix) {
 	glBindTexture(GL_TEXTURE_3D, boundingBox.m_gridTex);
 
 	boundingBox.submitProxyGeometry();
+	//boundingBox.submitProxyPlane(count);
 	glDisable(GL_BLEND);
 	glEnable(GL_CULL_FACE); 
+	glEnable(GL_DEPTH_TEST);
 }
 
 void drawBoundingBox(const mat4& viewMatrix, const mat4& projectionMatrix) {
@@ -377,17 +384,25 @@ void display(void)
 	}
 
 	{
-		labhelper::perf::Scope s("¨proxy"); 
+		labhelper::perf::Scope s("proxy"); 
 		if (proxy_active) {
-		
-			boundingBox.updateProxyGeometry(cameraPosition, (boundingBox.m_position-cameraPosition) + (boundingBox.m_position - lightPosition));
+			vec3 cameraView = (boundingBox.m_position - cameraPosition);
+			vec3 lightView = (boundingBox.m_position - lightPosition);
+
+			vec3 halfView = cameraView + lightView;
+			if (dot(cameraView, lightView) < 0.0) halfView = -cameraView + lightView;
+
+			
+			boundingBox.updateProxyGeometry(vec3(0.0), halfView);
 			proxy_update = false;
 		}
+
+		drawTexVolume(viewMatrix, projMatrix, true);
 	}
 
 	if (debug) {
 		drawBoundingBox(viewMatrix, projMatrix);
-		drawTexVolume(viewMatrix, projMatrix);
+		
 		debugDrawLight(viewMatrix, projMatrix, vec3(lightPosition));
 	}
 
@@ -525,7 +540,12 @@ void gui()
 	            ImGui::GetIO().Framerate, deltaTime);
 	// ----------------------------------------------------------
 
+	vec3 cameraView = (boundingBox.m_position - cameraPosition);
+	vec3 lightView = (boundingBox.m_position - lightPosition);
 
+	vec3 halfView = cameraView + lightView;
+	if (dot(cameraView, lightView) < 0.0) halfView = -cameraView + lightView;
+	ImGui::Text("halfView | x: %f, y: %f, z: %f, dot: %f", halfView.x, halfView.y, halfView.z, dot(cameraView, lightView));
 	////////////////////////////////////////////////////////////////////////////////
 	////////////////////////////////////////////////////////////////////////////////
 
@@ -570,8 +590,7 @@ int main(int argc, char* argv[])
 		// Update simulation
 		{
 			labhelper::perf::Scope s("Simulation");
-			if (simDeltaTime > (1.0f / 10.0f) && simRunning) {
-				printf("sim! dt: %f \n", simDeltaTime);
+			if (simDeltaTime > (1.0f / simUpdatesPerSecond) && simRunning) {
 				
 				boundingBox.updateVolume(simDeltaTime);
 				simDeltaTime = 0.0f;

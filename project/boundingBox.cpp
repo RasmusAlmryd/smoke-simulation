@@ -28,7 +28,7 @@ BoundingBox::BoundingBox(vec3 position, IntVec3 num_cells, int cell_size)
 	m_cell_size = cell_size;
 	m_num_cells = { 0,0,0 };
 	updateGridDim(num_cells);
-	initGrid();
+	//initGrid();
 	initializeVolume(m_grid.data(), m_num_cells.x, m_num_cells.y, m_num_cells.z);
 
 	//printf(num_cells)
@@ -159,8 +159,10 @@ void BoundingBox::generateMesh(void) {
 void BoundingBox::generateProxyGeometry(std::vector<vec3>& vertices, std::vector<short>& indices, vec3 viewOrigin, vec3 viewDirection) {
 
 	vec3 inRayOrigin = viewOrigin;
-	vec3 inRayDirection = viewDirection;
+	vec3 inRayDirection = -viewDirection;
 	inRayDirection = normalize(inRayDirection);
+
+	m_planeIndexing.clear();
 
 	int steps = 50;
 	float minDist;
@@ -192,6 +194,8 @@ void BoundingBox::generateProxyGeometry(std::vector<vec3>& vertices, std::vector
 
 		sortPoints(newPoints, newPoints.size() - 1, newPoints[newPoints.size() - 1], inRayDirection);
 
+		PlaneIndexValue pv = { newPoints.size() - 1, indices.size() / 3 };
+		m_planeIndexing.push_back(pv);
 
 		std::vector<short> newIndices = teselate(newPoints, vertices.size());
 
@@ -238,6 +242,7 @@ void BoundingBox::updateProxyGeometry(vec3 viewOrigin, vec3 viewDirection) {
 	generateProxyGeometry(vertices, triangleIndices, viewOrigin, viewDirection); 
 
 	m_num_proxy_triangles = triangleIndices.size() / 3; 
+
 
 
 	glBindBuffer(GL_ARRAY_BUFFER, m_proxy_positionBuffer); 
@@ -290,14 +295,6 @@ void sortPoints(std::vector<vec3> &points, int numPoints, vec3 planeOrigin, vec3
 		float a2 = pseudoangle(pos2.y, pos2.x);
 		return a1 > a2;
 	});
-	//std::sort(points.begin(), points.begin() + numPoints, [&](const vec3& p1, const vec3& p2) {
-	//	vec3 v1 = p1 - planeOrigin;
-	//	vec3 v2 = p2 - planeOrigin;
-	//	vec3 crossRes = cross(v1, v2);
-	//	float a1 = pseudoangle(dot(p1, v1), dot(p1, crossRes));
-	//	//return dot(crossRes, planeNormal) < 0.0f;
-	//	return a1 < 0.0;
-	//	});
 }
 
 bool rayPlaneIntersection(vec3 &intersectionPoint, vec3 rayOrigin, vec3 rayDir, float max_t, vec3 planeOrigin, vec3 planeNormal) {
@@ -419,31 +416,14 @@ void BoundingBox::generateVolumeTex(void) {
 	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
 	glTexImage3D(GL_TEXTURE_3D, 0, GL_R32F, m_num_cells.x, m_num_cells.y, m_num_cells.z, 0, GL_RED, GL_FLOAT, m_grid.data());
 
 }
 
 void BoundingBox::uppdateVolumeTexture() {
-	/*for (int x = 0; x < m_num_cells.x; x++) {
-		for (int y = m_num_cells.y-1; y >= 0; y--) {
-			for (int z = 0; z < m_num_cells.z; z++) {
-				if (y != 0) {
-					if (m_grid[x + (y - 1) * m_num_cells.x + z * m_num_cells.x * m_num_cells.y] > 0.0f) {
-						m_grid[x + y * m_num_cells.x + z * m_num_cells.x * m_num_cells.y] = 1.0f;
-					}
-					else {
-						m_grid[x + y * m_num_cells.x + z * m_num_cells.x * m_num_cells.y] = 0.0f;
-					}
-				}
-				else {
-					m_grid[x + y * m_num_cells.x + z * m_num_cells.x * m_num_cells.y] = 0.0f;
-				}
-			}
-		}
-	}*/
 
 	glBindTexture(GL_TEXTURE_3D, m_gridTex);
 	glTexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, 0, m_num_cells.x, m_num_cells.y, m_num_cells.z, GL_RED, GL_FLOAT, m_grid.data());
@@ -456,16 +436,6 @@ void BoundingBox::updateVolume(float dt) {
 	int z = 4;
 	simulate(m_grid.data(), dt);
 
-	/*for (int x = 0; x < m_num_cells.x; x++) {
-		for (int y = 0; y < m_num_cells.y; y++) {
-			for (int z = 0; z < m_num_cells.z; z++) {
-				if (m_grid[x + y * m_num_cells.x + z * m_num_cells.x * m_num_cells.y] < 0.0f) printf("negative: x:%d y:%d z:%d, value: %f \n", x, y, z, m_grid[x + y * m_num_cells.x + z * m_num_cells.x * m_num_cells.y]);
-			}
-		}
-	}*/
-	printf("------- \n");
-	//printf("first val %f", m_grid[x + y * m_num_cells.x + z * m_num_cells.x * m_num_cells.y]);
-	//printf("float: %d", sizeof(float));
 	uppdateVolumeTexture();
 }
 
@@ -522,7 +492,7 @@ void BoundingBox::submitProxyGeometry(void)
 		return;
 	}
 
-	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	//glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
 	glBindVertexArray(m_proxy_vao);
 	//glDrawElements(GL_TRIANGLES, 108, GL_UNSIGNED_INT, 0);
@@ -533,4 +503,29 @@ void BoundingBox::submitProxyGeometry(void)
 
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
+}
+
+void BoundingBox::submitProxyPlane(int planeIndex) {
+	if (m_proxy_vao == UINT32_MAX)
+	{
+		std::cout << "No vertex array is generated, cannot draw anything.\n";
+		return;
+	}
+
+	
+	if (planeIndex >= m_planeIndexing.size() || planeIndex < 0) {
+		std::cout << "plane index out of range \n";
+		return;
+	}
+
+
+	//glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+
+	glBindVertexArray(m_proxy_vao);
+
+	PlaneIndexValue iv = m_planeIndexing[planeIndex];
+
+	glDrawElements(GL_TRIANGLES, iv.numTriangles * 3, GL_UNSIGNED_SHORT, (void*)(iv.triangleOffset * 3 * sizeof(GLushort))); 
+
+	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 }

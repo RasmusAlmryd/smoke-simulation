@@ -19,6 +19,10 @@ struct IntVec3
 	}
 };
 
+struct PlaneIndexValue {
+	int numTriangles, triangleOffset;
+};
+
 
 
 class BoundingBox {
@@ -47,6 +51,10 @@ public:
 
 	int m_num_proxy_triangles;
 
+
+
+	std::vector<PlaneIndexValue> m_planeIndexing;
+
 	BoundingBox(vec3 position, IntVec3 num_cells, int cell_size);
 
 	// Update volume grid dimensions and generate new grid
@@ -74,6 +82,8 @@ public:
 	void submitTriangles(void);
 
 	void submitProxyGeometry(void);
+
+	void submitProxyPlane(int planeIndex);
 
 	// Free allocated memory by grid
 	void freeGrid(void);

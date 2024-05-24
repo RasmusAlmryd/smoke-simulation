@@ -22,7 +22,7 @@ float* dev_p;
 
 float gravity = -9.82; // m/s^2
 
-#define OVER_RELAXATION 1.3;
+#define OVER_RELAXATION 1.9;
 
 void getGPUProperties() {
 	//Discover GPU attributes
@@ -172,6 +172,21 @@ void deleteVolume() {
 		cudaFree(dev_v[i]);
 	}
 	cudaFree(dev_s);
+}
+
+
+__global__ void fillSmoke(float* smoke0, float* smoke1, uint3 normalDim, float3 sphereCenter, float sphereDiameter) {
+	int x = threadIdx.x + blockDim.x * blockIdx.x + 1;
+	int y = threadIdx.y + blockDim.y * blockIdx.y + 1;
+	int z = threadIdx.z + blockDim.z * blockIdx.z + 1;
+
+	if (x < normalDim.x-1 && y < normalDim.y-1 && z < normalDim.z-1) {
+		float dist = powf(x - sphereCenter.x, 2) + powf(y - sphereCenter.y, 2) + powf(z - sphereCenter.z, 2);
+		if (dist < sphereDiameter) {
+			smoke0[x + y * normalDim.x + z * normalDim.x * normalDim.y] = 1.0f;
+			smoke1[x + y * normalDim.x + z * normalDim.x * normalDim.y] = 1.0f;
+		}
+	}
 }
 
 __global__ void integrate(float *v, bool *s, uint3 normalDim, uint3 staggeredDim, float dt, float gravity) {
@@ -605,10 +620,8 @@ int tempIndexNow = 1;
 int tempIndexPast = 0;
 
 void simulate(float* smoke_grid, float dt) {
-	printf("smoke sim simulate()");
 	cudaError_t err;
 
-	//return;
 	tempIndexPast = tempIndexNow;
 	if (tempIndexNow == 0) tempIndexNow = 1;
 	else tempIndexNow = 0;
@@ -616,25 +629,20 @@ void simulate(float* smoke_grid, float dt) {
 	dim3 dimBlock(8, 8, 8); //512 
 	dim3 dimGrid(ceil(smokeDim.x / 8.0), ceil(smokeDim.y / 8.0), ceil(smokeDim.z / 8.0));
 
-	//printf("width: %d, height: %d, depth: %d \n", dimGrid.x, dimGrid.y, dimGrid.z);
-	printf("now: %d, past: %d", tempIndexNow, tempIndexPast);
+
+	float3 sphereCenter = { smokeDim.x / 2.0, smokeDim.y / 2.0 , smokeDim.z / 2.0 };
+	fillSmoke << <dimGrid, dimBlock >> > (dev_smoke[0], dev_smoke[1], smokeDim, sphereCenter, 3 * 3);
 
 	integrate<<<dimGrid, dimBlock>>>(dev_v[smokeIndex], dev_s, smokeDim, smokeStaggeredDim, dt, gravity);
-	
-	/*int num_iterations = 20;
-	for (int i = 0; i < num_iterations; i++) {
-		divergence << <dimGrid, dimBlock >> > (dev_u[smokeIndex], dev_v[smokeIndex], dev_w[smokeIndex], dev_p, dev_s, smokeDim, smokeStaggeredDim);
-		diverge << <dimGrid, dimBlock >> > (dev_u[smokeIndex], dev_v[smokeIndex], dev_w[smokeIndex], dev_p, dev_s, smokeDim, smokeStaggeredDim);
-	}*/
+
 
 	dim3 divdimBlock(8, 8, 8); //512 
 	dim3 divdimGrid(ceil(ceil(smokeDim.x / 2.0) / 8.0), ceil(smokeDim.y / 8.0), ceil(smokeDim.z / 8.0));
-	int num_iterations = 50;
+	int num_iterations = 100;
 	for (int i = 0; i < num_iterations; i++) {
 		divergenceTemp << <divdimGrid, divdimBlock >> > (dev_u[tempIndexNow], dev_v[tempIndexNow], dev_w[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, 0);
 		divergenceTemp << <divdimGrid, divdimBlock >> > (dev_u[tempIndexNow], dev_v[tempIndexNow], dev_w[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, 1);
 	}
-
 
 	velocityAdvectionU << <dimGrid, dimBlock >> > (dev_u[tempIndexNow], dev_u[tempIndexPast], dev_v[tempIndexNow], dev_w[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, dt);
 	velocityAdvectionV << <dimGrid, dimBlock >> > (dev_v[tempIndexNow], dev_v[tempIndexPast], dev_u[tempIndexNow], dev_w[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, dt);
