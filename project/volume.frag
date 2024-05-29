@@ -34,6 +34,7 @@ vec4 simpleMarch(vec3 viewVector, vec3 start, ivec3 volumeSize){
     float alpha = 0.0f;
     vec3 current = start + viewVector/2;
     float red = 1.0f;
+    float green = 1.0f;
 
     for(int i = 0; i<maxIter; i++){
         
@@ -44,10 +45,13 @@ vec4 simpleMarch(vec3 viewVector, vec3 start, ivec3 volumeSize){
         }
 
         float a = texture(gridTex, (current/(volumeSize/2)+1)/2).r;
+        if(a > 0.0f) red = 0.0f;
+        if(a < 0.0f) green = 0.0f;
+
         vec3 dist = abs(floor(current+volumeSize/2)+0.5f - (current+volumeSize/2)) *2;
-        alpha += (1-sqrt(pow(dist.x,2) + pow(dist.y,2) + pow(dist.z,2)))*a;
+        alpha += (1-sqrt(pow(dist.x,2) + pow(dist.y,2) + pow(dist.z,2)))*abs(a);
         
-        if(abs(a) > 1.0f) red = 0.0f;
+        
         /*if(texture(gridTex, (current/(volumeSize/2)+1)/2).r >0.1f){
             //alpha += 0.2f;
             //alpha = 1.0f;
@@ -61,7 +65,7 @@ vec4 simpleMarch(vec3 viewVector, vec3 start, ivec3 volumeSize){
         current += viewVector;
     }
 
-    return vec4(red, 1.0f, 1.0f, alpha);
+    return vec4(red, green, 1.0f, alpha);
 }
 
 

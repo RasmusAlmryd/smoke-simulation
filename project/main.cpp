@@ -43,7 +43,7 @@ ivec2 g_prevMouseCoords = { -1, -1 };
 bool g_isMouseDragging = false;
 
 // Debug 
-bool debug = false;
+bool debug = true;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Shader programs
@@ -54,6 +54,8 @@ GLuint backgroundProgram;
 GLuint boundingShaderProgram;
 GLuint volumeShaderProgram;
 GLuint texVolumeShaderProgram;
+GLuint lightVolumeShaderProgram;
+GLuint testShaderProgram;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Environment
@@ -66,14 +68,21 @@ const std::string envmap_base_name = "001";
 // Light source
 ///////////////////////////////////////////////////////////////////////////////
 vec3 lightPosition;
-vec3 point_light_color = vec3(1.f, 1.f, 1.f);
+//vec3 point_light_color = vec3(1.f, 1.f, 1.f);
+vec3 point_light_color = vec3(0.9882f, 0.9333f, 0.6549f);
 
 float point_light_intensity_multiplier = 10000.0f;
+
+mat4 lightViewMatrix;
+mat4 lightProjMatrix;
+
+FboInfo lightMapFB;
+int lightMapResolution = 512;
 
 ///////////////////////////////////////////////////////////////////////////////
 // BoundingBox
 ///////////////////////////////////////////////////////////////////////////////
-IntVec3 num_cells = { 48,48,48};
+IntVec3 num_cells = { 80,80,80};
 BoundingBox boundingBox(vec3(0,0,0), num_cells, 1);
 
 GLuint gridTex;
@@ -81,21 +90,30 @@ float simDeltaTime = 0.0f;
 bool simRunning = false;
 const float simUpdatesPerSecond = 20;
 
-bool proxy_active = false;
-bool proxy_update = false;
+bool proxy_active = true;
+bool proxy_update = true;
 
 int count = 0;
+
+float generalUpdateDt = 0.0f;
+const int generalUpdatesPerSecond = 20;
+
+bool drawing_volume = false;
+
+vec3 spherePos;
  
 ///////////////////////////////////////////////////////////////////////////////
 // Camera parameters.
 ///////////////////////////////////////////////////////////////////////////////
 //vec3 cameraPosition(-70.0f, 50.0f, 70.0f);
-vec3 cameraPosition(1.0f, 7.0f, 18.0f);
+vec3 cameraPosition(1.0f, 20.0f, 100.0f);
 vec3 cameraDirection = normalize(vec3(0.0f) - cameraPosition);
 float cameraSpeed = 13.f;
 float cameraSpeedBoost = cameraSpeed * 4;
 
 vec3 worldUp(0.0f, 1.0f, 0.0f);
+
+FboInfo viewFB;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Models
@@ -148,6 +166,20 @@ void loadShaders(bool is_reload)
 		std::cout << "shader" << std::endl;
 		texVolumeShaderProgram = shader;
 	}
+
+	shader = labhelper::loadShaderProgram("../project/light.vert", "../project/light.frag", is_reload);
+	if (shader != 0)
+	{
+		std::cout << "shader" << std::endl;
+		lightVolumeShaderProgram = shader;
+	}
+
+	shader = labhelper::loadShaderProgram("../project/test.vert", "../project/test.frag", is_reload);
+	if (shader != 0)
+	{
+		std::cout << "shader" << std::endl;
+		testShaderProgram = shader;
+	}
 }
 
 
@@ -182,14 +214,33 @@ void initialize()
 	environmentMap = labhelper::loadHdrTexture("../scenes/envmaps/" + envmap_base_name + ".hdr");
 
 	boundingBox.generateMesh();
-	boundingBox.initProxyGeometry(cameraPosition, cameraDirection);
+	boundingBox.initProxyGeometry(cameraPosition, cameraDirection, 100);
 	boundingBox.generateVolumeTex();
 
+	boundingBox.updateVolume(0.01f);
+
+	spherePos = vec3(boundingBox.m_num_cells.getGlmVec()/2.0f);
 
 
 	glEnable(GL_DEPTH_TEST); // enable Z-buffering
 	glEnable(GL_CULL_FACE);  // enables backface culling
 	//glDisable(GL_CULL_FACE);
+
+
+
+	lightMapFB.resize(lightMapResolution, lightMapResolution);
+	
+
+	glBindTexture(GL_TEXTURE_2D, lightMapFB.depthBuffer);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST); 
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST); 
+
+	viewFB.resize(lightMapResolution, lightMapResolution);
+
+	glBindTexture(GL_TEXTURE_2D, viewFB.depthBuffer);
+
+	printf("light id: %d, view id: %d\n", viewFB.framebufferId, lightMapFB.framebufferId);
 }
 
 void debugDrawLight(const glm::mat4& viewMatrix,
@@ -231,29 +282,175 @@ void drawVolume(const mat4& viewMatrix, const mat4& projectionMatrix) {
 	glDisable(GL_BLEND);
 }
 
-void drawTexVolume(const mat4& viewMatrix, const mat4& projectionMatrix, bool backToFront) {
+
+void twoPassDraw(const mat4& viewMatrix, const mat4& projectionMatrix, bool backToFront, int planeIndex) {
+
+
+	///////////////////////////////////////////////////////////////////////
+	// Cmaera view pass
+	///////////////////////////////////////////////////////////////////////
+	glBindFramebuffer(GL_FRAMEBUFFER, viewFB.framebufferId);
+	glViewport(0, 0, viewFB.width, viewFB.height);
+
 	glUseProgram(texVolumeShaderProgram);
 	glEnable(GL_BLEND);
-	glDisable(GL_CULL_FACE); 
+	glDisable(GL_CULL_FACE);
 	glDisable(GL_DEPTH_TEST);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-	labhelper::setUniformSlow(texVolumeShaderProgram, "modelViewProjectionMatrix", projectionMatrix * viewMatrix);
-	labhelper::setUniformSlow(texVolumeShaderProgram, "volume_pos", boundingBox.m_position);
-
-	//labhelper::setUniformSlow(volumeShaderProgram, "modelViewMatrix", viewMatrix * boundingBox.m_modelMatrix);
-	//labhelper::setUniformSlow(volumeShaderProgram, "camera_pos", cameraPosition);
-
+	if (backToFront)
+	{
+		glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+	}
+	else {
+		glBlendFunc(GL_ONE_MINUS_DST_ALPHA, GL_ONE);
+	}
 
 	glActiveTexture(GL_TEXTURE8);
 	glBindTexture(GL_TEXTURE_3D, boundingBox.m_gridTex);
 
-	boundingBox.submitProxyGeometry();
-	//boundingBox.submitProxyPlane(count);
-	glDisable(GL_BLEND);
-	glEnable(GL_CULL_FACE); 
-	glEnable(GL_DEPTH_TEST);
+	glActiveTexture(GL_TEXTURE9);
+	glBindTexture(GL_TEXTURE_2D, lightMapFB.colorTextureTargets[0]);
+
+	boundingBox.submitProxyPlane(planeIndex);
+
+
+
+	///////////////////////////////////////////////////////////////////////
+	// Light view pass
+	///////////////////////////////////////////////////////////////////////
+	glBindFramebuffer(GL_FRAMEBUFFER, lightMapFB.framebufferId); 
+	glViewport(0, 0, lightMapFB.width, lightMapFB.height);
+
+	glUseProgram(lightVolumeShaderProgram);
+	labhelper::setUniformSlow(lightVolumeShaderProgram, "lightViewProjectionMatrix", lightProjMatrix * lightViewMatrix);
+	labhelper::setUniformSlow(lightVolumeShaderProgram, "lightViewMatrix", lightViewMatrix);
+	labhelper::setUniformSlow(lightVolumeShaderProgram, "volume_pos", boundingBox.m_position);
+	glEnable(GL_BLEND);
+	glDisable(GL_CULL_FACE);
+	glDisable(GL_DEPTH_TEST);
+
+	glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
+	boundingBox.submitProxyPlane(planeIndex);
 }
+
+
+void drawTexVolume(const mat4& viewMatrix, const mat4& projectionMatrix, bool backToFront) {
+
+	glBindTexture(GL_TEXTURE_2D, lightMapFB.depthBuffer);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, lightMapFB.framebufferId); 
+	glViewport(0, 0, lightMapFB.width, lightMapFB.height); 
+	glClearColor(point_light_color.x, point_light_color.y, point_light_color.z, 1.0); 
+	glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
+
+	glActiveTexture(GL_TEXTURE8);
+	glBindTexture(GL_TEXTURE_3D, boundingBox.m_gridTex);
+
+	glUseProgram(lightVolumeShaderProgram);
+	labhelper::setUniformSlow(lightVolumeShaderProgram, "lightViewProjectionMatrix", lightProjMatrix * lightViewMatrix);
+	labhelper::setUniformSlow(lightVolumeShaderProgram, "lightViewMatrix", lightViewMatrix);
+	labhelper::setUniformSlow(lightVolumeShaderProgram, "volume_pos", boundingBox.m_position);
+
+
+
+	glBindTexture(GL_TEXTURE_2D, viewFB.depthBuffer);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, viewFB.framebufferId);
+	glViewport(0, 0, viewFB.width, viewFB.height);
+	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+	
+
+	//if (backToFront)
+	//{
+	//	//glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	//	glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+	//}
+	//else {
+	//	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+	//	glBlendFunc(GL_ONE_MINUS_DST_ALPHA, GL_ONE);
+	//}
+
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	
+
+	/*glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glViewport(0, 0, windowWidth, windowHeight);
+
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);*/
+
+	glUseProgram(texVolumeShaderProgram);
+	//glEnable(GL_BLEND);
+	//glDisable(GL_CULL_FACE); 
+	//glDisable(GL_DEPTH_TEST);
+	//glDepthMask(GL_FALSE);
+	//glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	//
+
+	
+	mat4 modelMatrix(1.0f);
+	labhelper::setUniformSlow(texVolumeShaderProgram, "modelViewProjectionMatrix", projectionMatrix * viewMatrix * modelMatrix);
+	labhelper::setUniformSlow(texVolumeShaderProgram, "modelViewMatrix", viewMatrix * modelMatrix);
+
+
+	labhelper::setUniformSlow(texVolumeShaderProgram, "lightViewProjectionMatrix", lightProjMatrix * lightViewMatrix);
+	mat4 lightMatrix = translate(vec3(0.5f)) * scale(vec3(0.5f)) * lightProjMatrix * lightViewMatrix *inverse(viewMatrix);
+	labhelper::setUniformSlow(texVolumeShaderProgram, "lightMatrix", lightMatrix);
+
+	labhelper::setUniformSlow(texVolumeShaderProgram, "volume_pos", boundingBox.m_position);
+	labhelper::setUniformSlow(texVolumeShaderProgram, "backToFront", backToFront);
+
+
+	////
+	////labhelper::setUniformSlow(volumeShaderProgram, "camera_pos", cameraPosition);
+
+	//
+
+	glActiveTexture(GL_TEXTURE8);
+	glBindTexture(GL_TEXTURE_3D, boundingBox.m_gridTex);
+
+	/*twoPassDraw(viewMatrix, projectionMatrix, backToFront, 5);
+	twoPassDraw(viewMatrix, projectionMatrix, backToFront, 6);
+	twoPassDraw(viewMatrix, projectionMatrix, backToFront, 7);
+	twoPassDraw(viewMatrix, projectionMatrix, backToFront, 8);*/
+
+
+	for (int i = 0; i < boundingBox.m_planeIndexing.size(); i++) {
+		twoPassDraw(viewMatrix, projectionMatrix, backToFront, i);
+	}
+
+	//boundingBox.submitProxyGeometry();
+	//
+	//printf("size : %d\n", boundingBox.m_planeIndexing.size());
+	/*for (int i = 0; i < boundingBox.m_planeIndexing.size(); i++) {
+		boundingBox.submitProxyPlane(i);
+	}*/
+
+
+
+	glUseProgram(testShaderProgram);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glViewport(0, 0, windowWidth, windowHeight);
+
+	labhelper::setUniformSlow(testShaderProgram, "backToFront", backToFront);
+
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	glActiveTexture(GL_TEXTURE10);
+	glBindTexture(GL_TEXTURE_2D, viewFB.colorTextureTargets[0]);
+
+	labhelper::drawFullScreenQuad();
+
+	glDisable(GL_BLEND);
+	glEnable(GL_CULL_FACE);
+	glEnable(GL_DEPTH_TEST);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	
+}
+
+
 
 void drawBoundingBox(const mat4& viewMatrix, const mat4& projectionMatrix) {
 	glDisable(GL_CULL_FACE);
@@ -343,16 +540,29 @@ void display(void)
 		}
 	}
 
+	
+
 	///////////////////////////////////////////////////////////////////////////
 	// setup matrices
 	///////////////////////////////////////////////////////////////////////////
 	mat4 projMatrix = perspective(radians(45.0f), float(windowWidth) / float(windowHeight), 5.0f, 2000.0f);
 	mat4 viewMatrix = lookAt(cameraPosition, cameraPosition + cameraDirection, worldUp);
 
-	vec4 lightStartPosition = vec4(40.0f, 40.0f, 0.0f, 1.0f);
-	lightPosition = vec3(rotate(currentTime, worldUp) * lightStartPosition);
-	mat4 lightViewMatrix = lookAt(lightPosition, vec3(0.0f), worldUp);
-	mat4 lightProjMatrix = perspective(radians(45.0f), 1.0f, 25.0f, 100.0f);
+	vec4 lightStartPosition = vec4(80.0f, 40.0f, 0.0f, 1.0f);
+	lightPosition = vec3(lightStartPosition);
+	//lightPosition = vec3(rotate(currentTime, worldUp) * lightStartPosition);
+	lightViewMatrix = lookAt(lightPosition, boundingBox.m_position, worldUp);
+	//lightProjMatrix = perspective(radians(45.0f), 1.0f, 25.0f, 100.0f);
+	lightProjMatrix = perspective(radians(45.0f), 1.0f, 5.0f, 2000.0f);
+
+	if (simRunning) {
+		vec4 sphereStartPos = vec4(7, 0, 0, 1);
+		vec3 newSpherePos = spherePos + vec3(rotate(currentTime*5, worldUp) * sphereStartPos );
+		//printf("x:%f, y:%f, z:%f\n", newSpherePos.x, newSpherePos.y, newSpherePos.z);
+		setSpherePos(newSpherePos.x, newSpherePos.y, newSpherePos.z);
+
+	}
+
 
 	///////////////////////////////////////////////////////////////////////////
 	// Bind the environment map(s) to unused texture units
@@ -368,6 +578,8 @@ void display(void)
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glViewport(0, 0, windowWidth, windowHeight);
 	glClearColor(0.2f, 0.2f, 0.8f, 1.0f);
+	//glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	{
@@ -385,27 +597,54 @@ void display(void)
 
 	{
 		labhelper::perf::Scope s("proxy"); 
-		if (proxy_active) {
-			vec3 cameraView = (boundingBox.m_position - cameraPosition);
-			vec3 lightView = (boundingBox.m_position - lightPosition);
 
-			vec3 halfView = cameraView + lightView;
-			if (dot(cameraView, lightView) < 0.0) halfView = -cameraView + lightView;
-
-			
-			boundingBox.updateProxyGeometry(vec3(0.0), halfView);
-			proxy_update = false;
+		if (viewFB.width != windowWidth || viewFB.height != windowHeight)
+		{
+			viewFB.resize(windowWidth, windowHeight);
 		}
 
-		drawTexVolume(viewMatrix, projMatrix, true);
+		//glBindTexture(GL_TEXTURE_2D, viewFB.depthBuffer);
+		//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+		//glBindTexture(GL_TEXTURE_2D, 0);
+
+		//glBindTexture(GL_TEXTURE_2D, viewFB.depthBuffer);
+
+		//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST); 
+		//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST); 
+		
+		vec3 cameraView = (boundingBox.m_position - cameraPosition);
+		vec3 lightView = (boundingBox.m_position - lightPosition);
+		bool backToFront = dot(cameraView, lightView) < 0.0;
+
+		//drawing_volume = true;
+		drawTexVolume(viewMatrix, projMatrix, backToFront);
+		//drawing_volume = false;
 	}
 
 	if (debug) {
 		drawBoundingBox(viewMatrix, projMatrix);
-		
 		debugDrawLight(viewMatrix, projMatrix, vec3(lightPosition));
 	}
 
+}
+
+void update(float dt) {
+	if (proxy_active) {
+		vec3 cameraView = (boundingBox.m_position - cameraPosition);
+		vec3 lightView = (boundingBox.m_position - lightPosition);
+
+		cameraView = normalize(cameraView);
+		lightView = normalize(lightView);
+
+		vec3 halfView = cameraView + lightView;
+		if (dot(cameraView, lightView) < 0.0) halfView = -cameraView + lightView;
+
+		//printf("drwaing %d \n", drawing_volume);
+		boundingBox.updateProxyGeometry(vec3(0.0), -halfView, 100);
+		proxy_update = false;
+	}
 }
 
 
@@ -540,12 +779,6 @@ void gui()
 	            ImGui::GetIO().Framerate, deltaTime);
 	// ----------------------------------------------------------
 
-	vec3 cameraView = (boundingBox.m_position - cameraPosition);
-	vec3 lightView = (boundingBox.m_position - lightPosition);
-
-	vec3 halfView = cameraView + lightView;
-	if (dot(cameraView, lightView) < 0.0) halfView = -cameraView + lightView;
-	ImGui::Text("halfView | x: %f, y: %f, z: %f, dot: %f", halfView.x, halfView.y, halfView.z, dot(cameraView, lightView));
 	////////////////////////////////////////////////////////////////////////////////
 	////////////////////////////////////////////////////////////////////////////////
 
@@ -554,7 +787,7 @@ void gui()
 
 int main(int argc, char* argv[])
 {
-	g_window = labhelper::init_window_SDL("OpenGL Project");
+	g_window = labhelper::init_window_SDL("Smoke simulation [CUDA,OpenGL]");
 
 	initialize();
 
@@ -570,8 +803,11 @@ int main(int argc, char* argv[])
 		previousTime = currentTime;
 		currentTime = timeSinceStart.count();
 		deltaTime = currentTime - previousTime;
+
 		if (simRunning) simDeltaTime += deltaTime;
 		else simDeltaTime = 0.0f;
+		generalUpdateDt += deltaTime;
+
 
 		// check events (keyboard among other)
 		stopRendering = handleEvents();
@@ -594,6 +830,15 @@ int main(int argc, char* argv[])
 				
 				boundingBox.updateVolume(simDeltaTime);
 				simDeltaTime = 0.0f;
+			}
+		}
+
+		// General update call
+		{
+			if (generalUpdateDt > (1.0f / generalUpdatesPerSecond)) {
+
+				update(generalUpdateDt);
+				generalUpdateDt = 0.0f;
 			}
 		}
 

@@ -65,11 +65,11 @@ public:
 	// Generate mesh
 	void generateMesh(void);
 
-	void initProxyGeometry(vec3 viewOrigin, vec3 viewDirection);
+	void initProxyGeometry(vec3 viewOrigin, vec3 viewDirection, int steps);
 
-	void updateProxyGeometry(vec3 viewOrigin, vec3 viewDirection);
+	void updateProxyGeometry(vec3 viewOrigin, vec3 viewDirection, int steps);
 
-	void generateProxyGeometry(std::vector<vec3>& vertices, std::vector<short>& indices, vec3 viewOrigin, vec3 viewDirection);
+	void generateProxyGeometry(std::vector<vec3>& vertices, std::vector<short>& indices, vec3 viewOrigin, vec3 viewDirection, int steps);
 
 	// Generate volume texture
 	void generateVolumeTex(void);

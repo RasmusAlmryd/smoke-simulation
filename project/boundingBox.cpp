@@ -156,7 +156,7 @@ void BoundingBox::generateMesh(void) {
 	
 }
 
-void BoundingBox::generateProxyGeometry(std::vector<vec3>& vertices, std::vector<short>& indices, vec3 viewOrigin, vec3 viewDirection) {
+void BoundingBox::generateProxyGeometry(std::vector<vec3>& vertices, std::vector<short>& indices, vec3 viewOrigin, vec3 viewDirection, int steps) {
 
 	vec3 inRayOrigin = viewOrigin;
 	vec3 inRayDirection = -viewDirection;
@@ -164,7 +164,7 @@ void BoundingBox::generateProxyGeometry(std::vector<vec3>& vertices, std::vector
 
 	m_planeIndexing.clear();
 
-	int steps = 50;
+	//int steps = 50;
 	float minDist;
 	float maxDist;
 
@@ -209,12 +209,12 @@ void BoundingBox::generateProxyGeometry(std::vector<vec3>& vertices, std::vector
 }
 
 
-void BoundingBox::initProxyGeometry(vec3 viewOrigin, vec3 viewDirection) {
+void BoundingBox::initProxyGeometry(vec3 viewOrigin, vec3 viewDirection, int steps) {
 	
 	std::vector<vec3> vertices;
 	std::vector<short> triangleIndices;
 
-	generateProxyGeometry(vertices, triangleIndices, viewOrigin, viewDirection);
+	generateProxyGeometry(vertices, triangleIndices, viewOrigin, viewDirection, steps);
 
 	m_num_proxy_triangles = triangleIndices.size() / 3;
 
@@ -235,11 +235,11 @@ void BoundingBox::initProxyGeometry(vec3 viewOrigin, vec3 viewDirection) {
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, triangleIndices.size() * sizeof(short), triangleIndices.data(), GL_STATIC_DRAW); 
 }
 
-void BoundingBox::updateProxyGeometry(vec3 viewOrigin, vec3 viewDirection) {
+void BoundingBox::updateProxyGeometry(vec3 viewOrigin, vec3 viewDirection, int steps) {
 	std::vector<vec3> vertices; 
 	std::vector<short> triangleIndices; 
 
-	generateProxyGeometry(vertices, triangleIndices, viewOrigin, viewDirection); 
+	generateProxyGeometry(vertices, triangleIndices, viewOrigin, viewDirection, steps); 
 
 	m_num_proxy_triangles = triangleIndices.size() / 3; 
 

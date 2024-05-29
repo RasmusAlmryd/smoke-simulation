@@ -8,6 +8,10 @@
 #include "device_launch_parameters.h"
 #include "smokeSimulation.cuh"
 
+#include <glm/glm.hpp>
+#include <glm/gtx/transform.hpp>
+using namespace glm;
+
 
 uint3 smokeDim;
 uint3 smokeStaggeredDim;
@@ -21,8 +25,10 @@ bool* dev_s;
 float* dev_p;
 
 float gravity = -9.82; // m/s^2
+float buoyancy_alpha = 2.0f;
 
-#define OVER_RELAXATION 1.9;
+#define OVER_RELAXATION 1.9
+#define MAX_VELOCITY_PER_STEP 6.0f //squared
 
 void getGPUProperties() {
 	//Discover GPU attributes
@@ -189,15 +195,42 @@ __global__ void fillSmoke(float* smoke0, float* smoke1, uint3 normalDim, float3 
 	}
 }
 
-__global__ void integrate(float *v, bool *s, uint3 normalDim, uint3 staggeredDim, float dt, float gravity) {
+__global__ void integrate(float *v, float *smoke, bool *s, uint3 normalDim, uint3 staggeredDim, float dt, float gravity, float buoyancy_alpha) {
 	int x = threadIdx.x + blockDim.x * blockIdx.x;
 	int y = threadIdx.y + blockDim.y * blockIdx.y+1;
 	int z = threadIdx.z + blockDim.z * blockIdx.z;
 
 	if (x < normalDim.x && y < normalDim.y && z < normalDim.z) {
 		if (s[x + y * normalDim.x + z * normalDim.x * normalDim.y] != 0 && s[x + (y - 1) * normalDim.x + z * normalDim.x * normalDim.y] != 0) {
-			v[x + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] += gravity * dt;
+
+			//if (v[x + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] < 0.5f) {
+				float buoyancy = buoyancy_alpha* (smoke[x + y * normalDim.x + z * normalDim.x * normalDim.y] - 0.0f);
+				v[x + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] += gravity * dt + buoyancy * dt;
+			//}
 		}
+	}
+}
+
+__global__ void velocityConfinement(float* u, float* v, float* w, uint3 normalDim, uint3 staggeredDim, float dt) {
+	int x = threadIdx.x + blockDim.x * blockIdx.x +1;
+	int y = threadIdx.y + blockDim.y * blockIdx.y +1;
+	int z = threadIdx.z + blockDim.z * blockIdx.z +1;
+
+	if (x < normalDim.x && y < normalDim.y && z < normalDim.z) {
+		int staggeredIndex = x + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y;
+
+		float u_t = u[staggeredIndex];
+		float v_t = v[staggeredIndex];
+		float w_t = w[staggeredIndex];
+
+		float velLength = u_t * u_t + v_t * v_t + w_t * w_t;
+
+		if (velLength * dt > MAX_VELOCITY_PER_STEP){
+			u[staggeredIndex] = u_t * (MAX_VELOCITY_PER_STEP/(velLength * dt));
+			v[staggeredIndex] = v_t * (MAX_VELOCITY_PER_STEP/(velLength * dt));
+			w[staggeredIndex] = w_t * (MAX_VELOCITY_PER_STEP/(velLength * dt));
+		}
+
 	}
 }
 
@@ -314,16 +347,16 @@ __global__ void divergenceTemp(float* u, float* v, float* w, bool* s, uint3 norm
 	}
 }
 
-__global__ void extrapolate(float* u, float* v, float* w, uint3 normalDim, uint3 staggeredDim) {
+__global__ void extrapolate(float* velFeild, uint3 normalDim, uint3 staggeredDim, uchar3 direction) {
 	int x = threadIdx.x + blockDim.x * blockIdx.x;
 	int y = threadIdx.y + blockDim.y * blockIdx.y;
 	int z = threadIdx.z + blockDim.z * blockIdx.z;
 
-
-	if (x == 0){
-		u[x + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] = u[(x + 1) + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y];
+	
+	if (x < normalDim.x && y < normalDim.y && z < normalDim.z) {
+		velFeild[x + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] = velFeild[(x + direction.x) + (y + direction.y) * staggeredDim.x + (z + direction.z) * staggeredDim.x * staggeredDim.y];
+		velFeild[(staggeredDim.x-1) + (staggeredDim.y - 1) * staggeredDim.x + (staggeredDim.z - 1) * staggeredDim.x * staggeredDim.y] = velFeild[((staggeredDim.x - 1) - direction.x) + ((staggeredDim.y - 1) - direction.y) * staggeredDim.x + ((staggeredDim.z - 1) - direction.z) * staggeredDim.x * staggeredDim.y];
 	}
-
 }
 
 
@@ -438,6 +471,8 @@ __device__ float sampleVelocity(float* field, uint3 gridDim, float3 pos, float3 
 
 
 }
+
+
 
 
 
@@ -559,6 +594,16 @@ __global__ void advectSmoke(float* smoke0, float *smoke1, float* u, float* v, fl
 	}
 }
 
+__global__ void copyFeildAToB(float* feildA, float* feildB, uint3 dim) {
+	int x = threadIdx.x + blockDim.x * blockIdx.x + 1;
+	int y = threadIdx.y + blockDim.y * blockIdx.y + 1;
+	int z = threadIdx.z + blockDim.z * blockIdx.z + 1;
+
+	if(x < dim.x && y < dim.y && z < dim.z) {
+		feildB[x + y * dim.x + z * dim.x * dim.y] = feildA[x + y * dim.x + z * dim.x * dim.y];
+	}
+}
+
 __global__ void visualizeV(float* v, float* smoke, uint3 normalDim, uint3 staggeredDim, uint3 dir) {
 	int x = threadIdx.x + blockDim.x * blockIdx.x;
 	int y = threadIdx.y + blockDim.y * blockIdx.y;
@@ -618,6 +663,14 @@ __global__ void smokeKernal(float *grid, int width, int height, int depth) {
 
 int tempIndexNow = 1;
 int tempIndexPast = 0;
+int velindex = 0;
+
+float3 spherePosition = { smokeDim.x / 2.0, smokeDim.y / 2.0 , smokeDim.z / 2.0 };
+
+void setSpherePos(float x, float y, float z) {
+	spherePosition = { x,y,z };
+}
+
 
 void simulate(float* smoke_grid, float dt) {
 	cudaError_t err;
@@ -626,36 +679,71 @@ void simulate(float* smoke_grid, float dt) {
 	if (tempIndexNow == 0) tempIndexNow = 1;
 	else tempIndexNow = 0;
 
+
+
 	dim3 dimBlock(8, 8, 8); //512 
 	dim3 dimGrid(ceil(smokeDim.x / 8.0), ceil(smokeDim.y / 8.0), ceil(smokeDim.z / 8.0));
 
+	
+	//printf("x:%f, y:%f, z:%f\n", spherePosition.x, spherePosition.y, spherePosition.z);
+	fillSmoke << <dimGrid, dimBlock >> > (dev_smoke[0], dev_smoke[1], smokeDim, spherePosition, 3 * 3);
 
-	float3 sphereCenter = { smokeDim.x / 2.0, smokeDim.y / 2.0 , smokeDim.z / 2.0 };
-	fillSmoke << <dimGrid, dimBlock >> > (dev_smoke[0], dev_smoke[1], smokeDim, sphereCenter, 3 * 3);
+	integrate<<<dimGrid, dimBlock>>>(dev_v[smokeIndex], dev_smoke[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, dt, gravity, buoyancy_alpha);
 
-	integrate<<<dimGrid, dimBlock>>>(dev_v[smokeIndex], dev_s, smokeDim, smokeStaggeredDim, dt, gravity);
-
+	velocityConfinement << <dimGrid, dimBlock >> > (dev_u[tempIndexNow], dev_v[tempIndexNow], dev_w[tempIndexNow], smokeDim, smokeStaggeredDim, dt);
 
 	dim3 divdimBlock(8, 8, 8); //512 
 	dim3 divdimGrid(ceil(ceil(smokeDim.x / 2.0) / 8.0), ceil(smokeDim.y / 8.0), ceil(smokeDim.z / 8.0));
-	int num_iterations = 100;
+	int num_iterations = 30;
 	for (int i = 0; i < num_iterations; i++) {
 		divergenceTemp << <divdimGrid, divdimBlock >> > (dev_u[tempIndexNow], dev_v[tempIndexNow], dev_w[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, 0);
 		divergenceTemp << <divdimGrid, divdimBlock >> > (dev_u[tempIndexNow], dev_v[tempIndexNow], dev_w[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, 1);
+		//divergenceTemp << <divdimGrid, divdimBlock >> > (dev_u[tempIndexPast], dev_v[tempIndexPast], dev_w[tempIndexPast], dev_s, smokeDim, smokeStaggeredDim, 0);
+		//divergenceTemp << <divdimGrid, divdimBlock >> > (dev_u[tempIndexPast], dev_v[tempIndexPast], dev_w[tempIndexPast], dev_s, smokeDim, smokeStaggeredDim, 1);
+		//divergenceTemp << <divdimGrid, divdimBlock >> > (dev_u[velindex], dev_v[velindex], dev_w[velindex], dev_s, smokeDim, smokeStaggeredDim, 0);
+		//divergenceTemp << <divdimGrid, divdimBlock >> > (dev_u[velindex], dev_v[velindex], dev_w[velindex], dev_s, smokeDim, smokeStaggeredDim, 1);
 	}
+
+
+	/*dim3 dimBlock_extrapolate_u(1, 8, 8);
+	dim3 dimGrid_extrapolate_u(1, ceil(smokeDim.y / 8.0), ceil(smokeDim.z / 8.0));
+	uchar3 direction = { 1, 0, 0 };
+
+	extrapolate << <dimGrid_extrapolate_u, dimBlock_extrapolate_u >> > (dev_u[tempIndexNow], smokeDim, smokeStaggeredDim, direction);
+
+	dim3 dimBlock_extrapolate_v(8, 1, 8);
+	dim3 dimGrid_extrapolate_v(ceil(smokeDim.y / 8.0), 1, ceil(smokeDim.z / 8.0));
+	direction = { 0, 1, 0 };
+
+	extrapolate << <dimGrid_extrapolate_v, dimBlock_extrapolate_v >> > (dev_v[tempIndexNow], smokeDim, smokeStaggeredDim, direction);
+
+	dim3 dimBlock_extrapolate_w(8, 8, 1);
+	dim3 dimGrid_extrapolate_w(ceil(smokeDim.y / 8.0), ceil(smokeDim.z / 8.0), 1);
+	direction = { 0, 0, 1 };
+
+	extrapolate << <dimGrid_extrapolate_w, dimBlock_extrapolate_w >> > (dev_w[tempIndexNow], smokeDim, smokeStaggeredDim, direction);*/
+
+
 
 	velocityAdvectionU << <dimGrid, dimBlock >> > (dev_u[tempIndexNow], dev_u[tempIndexPast], dev_v[tempIndexNow], dev_w[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, dt);
 	velocityAdvectionV << <dimGrid, dimBlock >> > (dev_v[tempIndexNow], dev_v[tempIndexPast], dev_u[tempIndexNow], dev_w[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, dt);
 	velocityAdvectionW << <dimGrid, dimBlock >> > (dev_w[tempIndexNow], dev_w[tempIndexPast], dev_u[tempIndexNow], dev_v[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, dt);
 
+	// they are bigger by 1 in all directions not only 1
+
+	//copyFeildAToB << <dimGrid, dimBlock >> > (dev_u[tempIndexNow], dev_u[tempIndexPast], smokeStaggeredDim);
+	//copyFeildAToB << <dimGrid, dimBlock >> > (dev_v[tempIndexNow], dev_v[tempIndexPast], smokeStaggeredDim);
+	//copyFeildAToB << <dimGrid, dimBlock >> > (dev_w[tempIndexNow], dev_w[tempIndexPast], smokeStaggeredDim);
+
+	//advectSmoke << <dimGrid, dimBlock >> > (dev_smoke[tempIndexNow], dev_smoke[tempIndexPast], dev_u[velindex], dev_v[velindex], dev_w[velindex], dev_s, smokeDim, smokeStaggeredDim, dt);
 	advectSmoke << <dimGrid, dimBlock >> > (dev_smoke[tempIndexNow], dev_smoke[tempIndexPast], dev_u[tempIndexPast], dev_v[tempIndexPast], dev_w[tempIndexPast], dev_s, smokeDim, smokeStaggeredDim, dt);
 
-	uint3 dir = { 0,0,1 };
-	//visualizeV << <dimGrid, dimBlock >> > (dev_w[tempIndexPast], dev_smoke[smokeIndex], smokeDim, smokeStaggeredDim, dir);
+	uint3 dir = { 0,1,0 };
+	//visualizeV << <dimGrid, dimBlock >> > (dev_v[tempIndexPast], dev_smoke[tempIndexPast], smokeDim, smokeStaggeredDim, dir);
 	//visualizeS << <dimGrid, dimBlock >> > (dev_s, dev_smoke[smokeIndex], smokeDim, smokeStaggeredDim);
 	//visualizeP << <dimGrid, dimBlock >> > (dev_p, dev_smoke[smokeIndex], smokeDim, smokeStaggeredDim);
 
-	//err = cudaMemcpy(smoke_grid, dev_smoke[smokeIndex], smokeDim.x * smokeDim.y * smokeDim.z * sizeof(float), cudaMemcpyDeviceToHost);
+	//err = cudaMemcpy(smoke_grid, dev_smoke[tempIndexNow], smokeDim.x * smokeDim.y * smokeDim.z * sizeof(float), cudaMemcpyDeviceToHost);
 	err = cudaMemcpy(smoke_grid, dev_smoke[tempIndexPast], smokeDim.x * smokeDim.y * smokeDim.z * sizeof(float), cudaMemcpyDeviceToHost);
 	if (err != cudaSuccess) {
 		fprintf(stderr, "Error copying data from device to host: %s\n", cudaGetErrorString(err));
