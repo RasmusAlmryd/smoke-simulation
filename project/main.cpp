@@ -8,6 +8,7 @@ extern "C" _declspec(dllexport) unsigned int NvOptimusEnablement = 0x00000001;
 #include <cstdlib>
 #include <algorithm>
 #include <chrono>
+#include <vector>
 
 #include <labhelper.h>
 #include <imgui.h>
@@ -69,7 +70,7 @@ const std::string envmap_base_name = "001";
 ///////////////////////////////////////////////////////////////////////////////
 vec3 lightPosition;
 //vec3 point_light_color = vec3(1.f, 1.f, 1.f);
-vec3 point_light_color = vec3(0.9882f, 0.9333f, 0.6549f);
+vec3 point_light_color = vec3(0.9882f, 0.9333f, 0.7549f);
 
 float point_light_intensity_multiplier = 10000.0f;
 
@@ -100,7 +101,27 @@ const int generalUpdatesPerSecond = 20;
 
 bool drawing_volume = false;
 
-vec3 spherePos;
+bool animating_smoke = false;
+
+vec3 smokePos;
+int smokeSourceId1;
+int sourceId2;
+
+vec3 obstaclePos;
+float obstacleRadius;
+int obstacleId1;
+int obstacleId2;
+
+///////////////////////////////////////////////////////////////////////////////
+// Floor
+///////////////////////////////////////////////////////////////////////////////
+int floorWidth = 1000;
+int floorDepth = 1000;
+vec3 floorPos(0.0f,-40.0f,0.0f);
+GLuint floorVAO;
+GLuint floorPB;
+GLuint floorIB;
+
  
 ///////////////////////////////////////////////////////////////////////////////
 // Camera parameters.
@@ -122,9 +143,21 @@ labhelper::Model* fighterModel = nullptr;
 labhelper::Model* landingpadModel = nullptr;
 labhelper::Model* sphereModel = nullptr;
 
+labhelper::Texture floorTexture;
+
 mat4 roomModelMatrix;
 mat4 landingPadModelMatrix;
 mat4 fighterModelMatrix;
+
+
+///////////////////////////////////////////////////////////////////////////////
+// Render Options
+///////////////////////////////////////////////////////////////////////////////
+
+bool add_shadows = false;
+float shadowAlpha = 0.7f;
+float imGuiTempColor[3] = { point_light_color.x, point_light_color.y, point_light_color.z };
+
 
 void loadShaders(bool is_reload)
 {
@@ -182,6 +215,41 @@ void loadShaders(bool is_reload)
 	}
 }
 
+void initFloor() {
+
+	float halfWidth = floorWidth / 2.0f;
+	float halfDepth = floorDepth / 2.0f;
+
+	float vertices[] = {
+		halfWidth + floorPos.x, floorPos.y, halfDepth + floorPos.z,
+		halfWidth + floorPos.x, floorPos.y, -halfDepth + floorPos.z,
+		-halfWidth + floorPos.x, floorPos.y, -halfDepth + floorPos.z,
+		-halfWidth + floorPos.x, floorPos.y, halfDepth + floorPos.z,
+	};
+
+
+	glGenVertexArrays(1, &floorVAO);
+	glBindVertexArray(floorVAO);
+
+
+	glGenBuffers(1, &floorPB);
+	glBindBuffer(GL_ARRAY_BUFFER, floorPB);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 3*4, vertices, GL_STATIC_DRAW);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 3, GL_FLOAT, false /*normalized*/, 0 /*stride*/, 0 /*offset*/);
+
+
+
+	int indices[] = {
+		0, 1, 2,
+		2, 3, 0  
+	};
+
+	glGenBuffers(1, &floorIB);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, floorIB);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(int) * 3* 2 , indices, GL_STATIC_DRAW);
+}
+
 
 ///////////////////////////////////////////////////////////////////////////////
 /// This function is called once at the start of the program and never again
@@ -204,6 +272,14 @@ void initialize()
 	landingpadModel = labhelper::loadModelFromOBJ("../scenes/landingpad.obj");
 	sphereModel = labhelper::loadModelFromOBJ("../scenes/sphere.obj");
 
+	floorTexture.load("../scenes/", "floor.png", 3);
+	initFloor();
+
+
+
+
+	printf("sphere: %d", sphereModel->m_vaob);
+
 	roomModelMatrix = mat4(1.0f);
 	fighterModelMatrix = translate(15.0f * worldUp);
 	landingPadModelMatrix = mat4(1.0f);
@@ -217,15 +293,16 @@ void initialize()
 	boundingBox.initProxyGeometry(cameraPosition, cameraDirection, 100);
 	boundingBox.generateVolumeTex();
 
+
+	smokePos = vec3(boundingBox.m_num_cells.getGlmVec()/2.0f);
+	smokeSourceId1 = addSmokeSource(smokePos.x, smokePos.y, smokePos.z, 5);
+
+	obstacleId2 = addObstacle(60,10,60, 0, 0, 0, 13);
+
 	boundingBox.updateVolume(0.01f);
-
-	spherePos = vec3(boundingBox.m_num_cells.getGlmVec()/2.0f);
-
 
 	glEnable(GL_DEPTH_TEST); // enable Z-buffering
 	glEnable(GL_CULL_FACE);  // enables backface culling
-	//glDisable(GL_CULL_FACE);
-
 
 
 	lightMapFB.resize(lightMapResolution, lightMapResolution);
@@ -251,6 +328,21 @@ void debugDrawLight(const glm::mat4& viewMatrix,
 	glUseProgram(shaderProgram);
 	labhelper::setUniformSlow(shaderProgram, "modelViewProjectionMatrix",
 	                          projectionMatrix * viewMatrix * modelMatrix);
+	
+	labhelper::render(sphereModel);
+}
+
+void drawObstacle(const glm::mat4& viewMatrix,
+	const glm::mat4& projectionMatrix,
+	const glm::vec3& worldSpaceObstaclePos,
+	float radius) {
+	float width = radius * 2;
+	mat4 modelMatrix = glm::scale(translate(worldSpaceObstaclePos),vec3(width) * 0.2f);
+
+	glUseProgram(shaderProgram);
+	labhelper::setUniformSlow(shaderProgram, "modelViewProjectionMatrix",
+		projectionMatrix * viewMatrix * modelMatrix);
+	labhelper::setUniformSlow(shaderProgram, "material_color", vec3(1.0f));
 	labhelper::render(sphereModel);
 }
 
@@ -322,9 +414,9 @@ void twoPassDraw(const mat4& viewMatrix, const mat4& projectionMatrix, bool back
 	glViewport(0, 0, lightMapFB.width, lightMapFB.height);
 
 	glUseProgram(lightVolumeShaderProgram);
-	labhelper::setUniformSlow(lightVolumeShaderProgram, "lightViewProjectionMatrix", lightProjMatrix * lightViewMatrix);
+	/*labhelper::setUniformSlow(lightVolumeShaderProgram, "lightViewProjectionMatrix", lightProjMatrix * lightViewMatrix);
 	labhelper::setUniformSlow(lightVolumeShaderProgram, "lightViewMatrix", lightViewMatrix);
-	labhelper::setUniformSlow(lightVolumeShaderProgram, "volume_pos", boundingBox.m_position);
+	labhelper::setUniformSlow(lightVolumeShaderProgram, "volume_pos", boundingBox.m_position);*/
 	glEnable(GL_BLEND);
 	glDisable(GL_CULL_FACE);
 	glDisable(GL_DEPTH_TEST);
@@ -337,6 +429,10 @@ void twoPassDraw(const mat4& viewMatrix, const mat4& projectionMatrix, bool back
 
 void drawTexVolume(const mat4& viewMatrix, const mat4& projectionMatrix, bool backToFront) {
 
+
+	///////////////////////////////////////////////////////////////////////
+	// Configuration for light view pass
+	///////////////////////////////////////////////////////////////////////
 	glBindTexture(GL_TEXTURE_2D, lightMapFB.depthBuffer);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, lightMapFB.framebufferId); 
@@ -354,40 +450,21 @@ void drawTexVolume(const mat4& viewMatrix, const mat4& projectionMatrix, bool ba
 
 
 
+
+	///////////////////////////////////////////////////////////////////////
+	// Configuration for camera view pass
+	///////////////////////////////////////////////////////////////////////
+
 	glBindTexture(GL_TEXTURE_2D, viewFB.depthBuffer);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, viewFB.framebufferId);
 	glViewport(0, 0, viewFB.width, viewFB.height);
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-	
-
-	//if (backToFront)
-	//{
-	//	//glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	//	glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-	//}
-	//else {
-	//	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-	//	glBlendFunc(GL_ONE_MINUS_DST_ALPHA, GL_ONE);
-	//}
 
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	
-
-	/*glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	glViewport(0, 0, windowWidth, windowHeight);
-
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);*/
 
 	glUseProgram(texVolumeShaderProgram);
-	//glEnable(GL_BLEND);
-	//glDisable(GL_CULL_FACE); 
-	//glDisable(GL_DEPTH_TEST);
-	//glDepthMask(GL_FALSE);
-	//glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-	//
 
 	
 	mat4 modelMatrix(1.0f);
@@ -403,32 +480,20 @@ void drawTexVolume(const mat4& viewMatrix, const mat4& projectionMatrix, bool ba
 	labhelper::setUniformSlow(texVolumeShaderProgram, "backToFront", backToFront);
 
 
-	////
-	////labhelper::setUniformSlow(volumeShaderProgram, "camera_pos", cameraPosition);
-
-	//
-
 	glActiveTexture(GL_TEXTURE8);
 	glBindTexture(GL_TEXTURE_3D, boundingBox.m_gridTex);
-
-	/*twoPassDraw(viewMatrix, projectionMatrix, backToFront, 5);
-	twoPassDraw(viewMatrix, projectionMatrix, backToFront, 6);
-	twoPassDraw(viewMatrix, projectionMatrix, backToFront, 7);
-	twoPassDraw(viewMatrix, projectionMatrix, backToFront, 8);*/
 
 
 	for (int i = 0; i < boundingBox.m_planeIndexing.size(); i++) {
 		twoPassDraw(viewMatrix, projectionMatrix, backToFront, i);
 	}
 
-	//boundingBox.submitProxyGeometry();
-	//
-	//printf("size : %d\n", boundingBox.m_planeIndexing.size());
-	/*for (int i = 0; i < boundingBox.m_planeIndexing.size(); i++) {
-		boundingBox.submitProxyPlane(i);
-	}*/
 
 
+
+	///////////////////////////////////////////////////////////////////////
+	// Rendering Two-Pass resoult on screen quad
+	///////////////////////////////////////////////////////////////////////
 
 	glUseProgram(testShaderProgram);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -473,50 +538,44 @@ void drawBoundingBox(const mat4& viewMatrix, const mat4& projectionMatrix) {
 }
 
 
-///////////////////////////////////////////////////////////////////////////////
-/// This function is used to draw the main objects on the scene
-///////////////////////////////////////////////////////////////////////////////
-void drawScene(GLuint currentShaderProgram,
-               const mat4& viewMatrix,
-               const mat4& projectionMatrix,
-               const mat4& lightViewMatrix,
-               const mat4& lightProjectionMatrix)
-{
-	glUseProgram(currentShaderProgram);
-	// Light source
-	vec4 viewSpaceLightPosition = viewMatrix * vec4(lightPosition, 1.0f);
-	labhelper::setUniformSlow(currentShaderProgram, "point_light_color", point_light_color);
-	labhelper::setUniformSlow(currentShaderProgram, "point_light_intensity_multiplier",
-	                          point_light_intensity_multiplier);
-	labhelper::setUniformSlow(currentShaderProgram, "viewSpaceLightPosition", vec3(viewSpaceLightPosition));
-	labhelper::setUniformSlow(currentShaderProgram, "viewSpaceLightDir",
-	                          normalize(vec3(viewMatrix * vec4(-lightPosition, 0.0f))));
+void submitFloor(const mat4& viewMatrix,
+	const mat4& projectionMatrix) {
+	//glDisable(GL_CULL_FACE);
 
+	glUseProgram(simpleShaderProgram);
+	vec3 color = vec3(1, 1, 1);
 
-	// Environment
-	labhelper::setUniformSlow(currentShaderProgram, "environment_multiplier", environment_multiplier);
+	mat4 modelMatrix(1.0f);
+	labhelper::setUniformSlow(simpleShaderProgram, "modelViewProjectionMatrix", projectionMatrix * viewMatrix * modelMatrix);
+	labhelper::setUniformSlow(simpleShaderProgram, "modelViewMatrix", viewMatrix * modelMatrix);
+	labhelper::setUniformSlow(simpleShaderProgram, "material_color", color);
+	mat4 lightMatrix = translate(vec3(0.5f)) * scale(vec3(0.5f)) * lightProjMatrix * lightViewMatrix * inverse(viewMatrix); 
+	labhelper::setUniformSlow(simpleShaderProgram, "lightMatrix", lightMatrix);
+	labhelper::setUniformSlow(simpleShaderProgram, "point_light_color", point_light_color);
+	labhelper::setUniformSlow(simpleShaderProgram, "add_shadow", add_shadows);
+	labhelper::setUniformSlow(simpleShaderProgram, "shadowAlpha", shadowAlpha);
 
-	// camera
-	labhelper::setUniformSlow(currentShaderProgram, "viewInverse", inverse(viewMatrix));
+	glActiveTexture(GL_TEXTURE0); 
+	glBindTexture(GL_TEXTURE_2D, floorTexture.gl_id); 
 
-	// landing pad
-	labhelper::setUniformSlow(currentShaderProgram, "modelViewProjectionMatrix",
-	                          projectionMatrix * viewMatrix * landingPadModelMatrix);
-	labhelper::setUniformSlow(currentShaderProgram, "modelViewMatrix", viewMatrix * landingPadModelMatrix);
-	labhelper::setUniformSlow(currentShaderProgram, "normalMatrix",
-	                          inverse(transpose(viewMatrix * landingPadModelMatrix)));
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
-	labhelper::render(landingpadModel);
+	glActiveTexture(GL_TEXTURE9);
+	glBindTexture(GL_TEXTURE_2D, lightMapFB.colorTextureTargets[0]);
 
-	// Fighter
-	labhelper::setUniformSlow(currentShaderProgram, "modelViewProjectionMatrix",
-	                          projectionMatrix * viewMatrix * fighterModelMatrix);
-	labhelper::setUniformSlow(currentShaderProgram, "modelViewMatrix", viewMatrix * fighterModelMatrix);
-	labhelper::setUniformSlow(currentShaderProgram, "normalMatrix",
-	                          inverse(transpose(viewMatrix * fighterModelMatrix)));
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
 
-	labhelper::render(fighterModel);
+	//glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	glBindVertexArray(floorVAO);
+	glDrawElements(GL_TRIANGLES, 2 * 3, GL_UNSIGNED_INT, 0);
+
+	//glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	//glEnable(GL_CULL_FACE);
 }
+
+
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -526,6 +585,9 @@ void drawScene(GLuint currentShaderProgram,
 void display(void)
 {
 	labhelper::perf::Scope s( "Display" );
+
+	//Set light color;
+	point_light_color = vec3(imGuiTempColor[0], imGuiTempColor[1], imGuiTempColor[2]);
 
 	///////////////////////////////////////////////////////////////////////////
 	// Check if window size has changed and resize buffers as needed
@@ -548,19 +610,24 @@ void display(void)
 	mat4 projMatrix = perspective(radians(45.0f), float(windowWidth) / float(windowHeight), 5.0f, 2000.0f);
 	mat4 viewMatrix = lookAt(cameraPosition, cameraPosition + cameraDirection, worldUp);
 
-	vec4 lightStartPosition = vec4(80.0f, 40.0f, 0.0f, 1.0f);
+	vec4 lightStartPosition = vec4(120.0f, 80.0f, 0.0f, 1.0f);
 	lightPosition = vec3(lightStartPosition);
 	//lightPosition = vec3(rotate(currentTime, worldUp) * lightStartPosition);
 	lightViewMatrix = lookAt(lightPosition, boundingBox.m_position, worldUp);
 	//lightProjMatrix = perspective(radians(45.0f), 1.0f, 25.0f, 100.0f);
 	lightProjMatrix = perspective(radians(45.0f), 1.0f, 5.0f, 2000.0f);
 
-	if (simRunning) {
-		vec4 sphereStartPos = vec4(7, 0, 0, 1);
-		vec3 newSpherePos = spherePos + vec3(rotate(currentTime*5, worldUp) * sphereStartPos );
-		//printf("x:%f, y:%f, z:%f\n", newSpherePos.x, newSpherePos.y, newSpherePos.z);
-		setSpherePos(newSpherePos.x, newSpherePos.y, newSpherePos.z);
 
+
+	if (animating_smoke) {
+		vec4 sphereStartPos = vec4(20, 0, 0, 1);
+		vec3 newSpherePos;
+		newSpherePos = smokePos + vec3(rotate(currentTime*2, worldUp) * sphereStartPos );
+		updateObjectPos(smokeSourceId1, newSpherePos.x, newSpherePos.y, newSpherePos.z);
+	}
+	else {
+		vec3 newSpherePos = boundingBox.m_num_cells.getGlmVec()/2.0f;
+		updateObjectPos(smokeSourceId1, newSpherePos.x, newSpherePos.y, newSpherePos.z);
 	}
 
 
@@ -577,8 +644,9 @@ void display(void)
 	///////////////////////////////////////////////////////////////////////////
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glViewport(0, 0, windowWidth, windowHeight);
-	glClearColor(0.2f, 0.2f, 0.8f, 1.0f);
-	//glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+	vec3 bg_color = vec3(40.0f / 255.0f);
+	glClearColor(bg_color.x, bg_color.y, bg_color.z, 1.0f);
+	//glClearColor(0.2f, 0.2f, 0.8f, 1.0f);
 
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -588,39 +656,24 @@ void display(void)
 	}
 	{
 		labhelper::perf::Scope s( "Scene" );
-		//drawScene( shaderProgram, viewMatrix, projMatrix, lightViewMatrix, lightProjMatrix );
-	}
-	{
-		labhelper::perf::Scope s("volume");
-		//drawVolume(viewMatrix, projMatrix); 
+		submitFloor(viewMatrix, projMatrix);
 	}
 
+
 	{
-		labhelper::perf::Scope s("proxy"); 
+		labhelper::perf::Scope s("volume");
 
 		if (viewFB.width != windowWidth || viewFB.height != windowHeight)
 		{
 			viewFB.resize(windowWidth, windowHeight);
 		}
-
-		//glBindTexture(GL_TEXTURE_2D, viewFB.depthBuffer);
-		//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-		//glBindTexture(GL_TEXTURE_2D, 0);
-
-		//glBindTexture(GL_TEXTURE_2D, viewFB.depthBuffer);
-
-		//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST); 
-		//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST); 
 		
 		vec3 cameraView = (boundingBox.m_position - cameraPosition);
 		vec3 lightView = (boundingBox.m_position - lightPosition);
 		bool backToFront = dot(cameraView, lightView) < 0.0;
 
-		//drawing_volume = true;
 		drawTexVolume(viewMatrix, projMatrix, backToFront);
-		//drawing_volume = false;
+
 	}
 
 	if (debug) {
@@ -631,6 +684,7 @@ void display(void)
 }
 
 void update(float dt) {
+
 	if (proxy_active) {
 		vec3 cameraView = (boundingBox.m_position - cameraPosition);
 		vec3 lightView = (boundingBox.m_position - lightPosition);
@@ -641,7 +695,7 @@ void update(float dt) {
 		vec3 halfView = cameraView + lightView;
 		if (dot(cameraView, lightView) < 0.0) halfView = -cameraView + lightView;
 
-		//printf("drwaing %d \n", drawing_volume);
+		
 		boundingBox.updateProxyGeometry(vec3(0.0), -halfView, 100);
 		proxy_update = false;
 	}
@@ -669,7 +723,7 @@ bool handleEvents(void)
 		{
 			if ( labhelper::isGUIvisible() )
 			{
-				labhelper::hideGUI();
+				labhelper::hideGUI(); 
 			}
 			else
 			{
@@ -777,6 +831,18 @@ void gui()
 	// ----------------- Set variables --------------------------
 	ImGui::Text("Application average %.3f ms/frame (%.1f FPS) , ACTUAL: %.3f", 1000.0f / ImGui::GetIO().Framerate,
 	            ImGui::GetIO().Framerate, deltaTime);
+
+	ImGui::Text("Simulation dimensions: x: %d, y: %d, z: %d", boundingBox.m_num_cells.x, boundingBox.m_num_cells.y, boundingBox.m_num_cells.z);
+
+	ImGui::Checkbox("Add shadow to environment: ", &add_shadows);
+	ImGui::SliderFloat("Added shadow alpha:", &shadowAlpha, 0.0f, 1.0f);
+
+	ImGui::SliderFloat("Gravity:", getGravity(), -15.0f, 15.0f);
+	ImGui::SliderFloat("Buoyancy:", getBuoyancy(), 0.0f, 20.0f);
+
+	ImGui::Checkbox("Animate smoke:", &animating_smoke);
+
+	ImGui::ColorPicker3("Light color: ", &imGuiTempColor[0]);
 	// ----------------------------------------------------------
 
 	////////////////////////////////////////////////////////////////////////////////
@@ -835,6 +901,7 @@ int main(int argc, char* argv[])
 
 		// General update call
 		{
+			labhelper::perf::Scope s("proxy update");
 			if (generalUpdateDt > (1.0f / generalUpdatesPerSecond)) {
 
 				update(generalUpdateDt);

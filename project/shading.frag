@@ -110,6 +110,7 @@ vec3 calculateIndirectIllumination(vec3 wo, vec3 n)
 
 void main()
 {
+
 	float visibility = 1.0;
 	float attenuation = 1.0;
 

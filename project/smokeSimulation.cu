@@ -22,13 +22,44 @@ float* dev_u[2];
 float* dev_v[2];
 float* dev_w[2];
 bool* dev_s;
-float* dev_p;
+
+
 
 float gravity = -9.82; // m/s^2
 float buoyancy_alpha = 2.0f;
 
+float* getBuoyancy() {
+	return &buoyancy_alpha;
+}
+float* getGravity() {
+	return &gravity;
+}
+
 #define OVER_RELAXATION 1.9
-#define MAX_VELOCITY_PER_STEP 6.0f //squared
+#define MAX_VELOCITY_PER_STEP 3.0f //squared
+
+float* dev_obstacles;
+float* dev_smokeSources; 
+
+//std::vector<Sphere> obstacles;
+//std::vector<Sphere> smokeSources;
+
+struct Sphere {
+	int id;
+	float3 pos;
+	float3 vel;
+	float radius;
+	short type; // 0: obstacle, 1:smoke 
+
+};
+
+std::vector<Sphere> objects;
+
+int max_objects = 3;
+
+int currentId = 0;
+
+
 
 void getGPUProperties() {
 	//Discover GPU attributes
@@ -54,6 +85,43 @@ void getGPUProperties() {
 		exit(-1);
 	}
 }
+
+
+int addObstacle(float x, float y, float z, float vx, float vy, float vz, float r) {
+	float3 pos = { x,y,z };
+	float3 vel = { vx,vy,vz };
+	Sphere s = { currentId, pos, vel, r, 0};
+	objects.push_back(s);
+	currentId++;
+	return currentId - 1;
+}
+
+int addSmokeSource(float x, float y, float z, float r) {
+	float3 pos = { x,y,z };
+	float3 vel = { 0,0,0 };
+	Sphere s = { currentId, pos, vel, r, 1 };
+	objects.push_back(s);
+	currentId++;
+	return currentId - 1;
+}
+
+void updateObjectPos(int id, float x, float y, float z) {
+	float3 pos = { x,y,z };
+	objects[id].pos = pos;
+}
+
+std::vector<Sphere> getObjectsOfType(int type) {
+	std::vector<Sphere> object;
+	for (int i = 0; i < objects.size(); i++) {
+		if (objects[i].type == type) {
+			object.push_back(objects[i]);
+		}
+	}
+
+	return object;
+}
+
+
 
 void initializeVolume(float* smoke_grid, unsigned int width, unsigned int heigth, unsigned int depth) {
 	cudaError_t err; 
@@ -135,9 +203,10 @@ void initializeVolume(float* smoke_grid, unsigned int width, unsigned int heigth
 	}
 
 	std::vector<unsigned char> s_host(width * heigth * depth, 1);
+	int y = 0;
 	for (int x = 0; x < width; x++) {
 		for (int z = 0; z < depth; z++) {
-			int y = 0;
+			
 			s_host[x + y * width + z * width * heigth] = 0;
 		}
 	}
@@ -151,24 +220,26 @@ void initializeVolume(float* smoke_grid, unsigned int width, unsigned int heigth
 	s_host.clear();
 
 
-	// Presuare 
-	int pSize = width * heigth * depth * sizeof(float);
-	err = cudaMalloc(&dev_p, pSize);
+
+
+	// generate arrays for objects
+	int obstacleSize = (3 + 3 + 1) * sizeof(float) * max_objects; //pos, vel, radius
+	err = cudaMalloc(&dev_obstacles, obstacleSize);
 	if (err != 0) {
-		fprintf(stderr, "Error allocating S gird on GPU\n");
+		fprintf(stderr, "Error allocating dev_obstacles gird on GPU\n");
 		exit(-1);
 	}
 
-	/*err = cudaMemset(dev_p, st.data(), sSize, cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) {
-		fprintf(stderr, "Error copying data from host to device: %s\n", cudaGetErrorString(err));
+	int smokeSourcesSize = (3 + 1) * sizeof(float) * max_objects; //pos, radius
+	err = cudaMalloc(&dev_smokeSources, smokeSourcesSize);
+	if (err != 0) {
+		fprintf(stderr, "Error allocating dev_smokeSources gird on GPU\n");
 		exit(-1);
-	}*/
-	/*err = cudaMemset(dev_s, 1, sSize);
-	if (err != cudaSuccess) {
-		fprintf(stderr, "Error copying data from host to device: %s\n", cudaGetErrorString(err)); 
-		exit(-1); 
-	}*/
+	}
+
+
+
+	float3 spherePosition = { smokeDim.x / 2.0, smokeDim.y / 2.0 , smokeDim.z / 2.0 };
 }
 
 void deleteVolume() {
@@ -176,21 +247,72 @@ void deleteVolume() {
 		cudaFree(dev_smoke[i]);
 		cudaFree(dev_u[i]);
 		cudaFree(dev_v[i]);
+		cudaFree(dev_w[i]);
 	}
 	cudaFree(dev_s);
 }
 
 
-__global__ void fillSmoke(float* smoke0, float* smoke1, uint3 normalDim, float3 sphereCenter, float sphereDiameter) {
+__global__ void fillSmoke(float* smoke0, float* smoke1, uint3 normalDim, float* dev_smokeSources, int num_sources) {
 	int x = threadIdx.x + blockDim.x * blockIdx.x + 1;
 	int y = threadIdx.y + blockDim.y * blockIdx.y + 1;
 	int z = threadIdx.z + blockDim.z * blockIdx.z + 1;
 
 	if (x < normalDim.x-1 && y < normalDim.y-1 && z < normalDim.z-1) {
+		
+		for (int i = 0; i < num_sources; i++) {
+			float sx = dev_smokeSources[i * 4 + 0];
+			float sy = dev_smokeSources[i * 4 + 1];
+			float sz = dev_smokeSources[i * 4 + 2];
+			float sr = dev_smokeSources[i * 4 + 3];
+			
+			
+			float dist = powf(x - sx, 2) + powf(y - sy, 2) + powf(z - sz, 2);
+			if (dist < sr*sr) {
+				smoke0[x + y * normalDim.x + z * normalDim.x * normalDim.y] = 1.0f;
+				smoke1[x + y * normalDim.x + z * normalDim.x * normalDim.y] = 1.0f;
+			}
+		}
+
+	}
+}
+
+__global__ void fillSphere(float* v0, float* v1, float value,  uint3 staggeredDim, float3 sphereCenter, float sphereDiameter) {
+	int x = threadIdx.x + blockDim.x * blockIdx.x + 1;
+	int y = threadIdx.y + blockDim.y * blockIdx.y + 1;
+	int z = threadIdx.z + blockDim.z * blockIdx.z + 1;
+
+	if (x < staggeredDim.x - 1 && y < staggeredDim.y - 1 && z < staggeredDim.z - 1) {
 		float dist = powf(x - sphereCenter.x, 2) + powf(y - sphereCenter.y, 2) + powf(z - sphereCenter.z, 2);
 		if (dist < sphereDiameter) {
-			smoke0[x + y * normalDim.x + z * normalDim.x * normalDim.y] = 1.0f;
-			smoke1[x + y * normalDim.x + z * normalDim.x * normalDim.y] = 1.0f;
+			v0[x + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] = value;
+			v1[x + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] = value;
+		}
+	}
+}
+
+__global__ void fillObstacle(bool* s, uint3 normalDim, float* dev_obstacles, int num_obstacles) {
+	int x = threadIdx.x + blockDim.x * blockIdx.x + 1;
+	int y = threadIdx.y + blockDim.y * blockIdx.y + 1;
+	int z = threadIdx.z + blockDim.z * blockIdx.z + 1;
+
+	if (x < normalDim.x - 1 && y < normalDim.y - 1 && z < normalDim.z - 1) {
+		for (int i = 0; i < num_obstacles; i++) {
+			float sx = dev_obstacles[i * 7 + 0];
+			float sy = dev_obstacles[i * 7 + 1];
+			float sz = dev_obstacles[i * 7 + 2];
+			float svx = dev_obstacles[i * 7 + 3];
+			float svy = dev_obstacles[i * 7 + 4];
+			float svz = dev_obstacles[i * 7 + 5];
+			float sr = dev_obstacles[i * 7 + 6];
+			
+			float dist = powf(x - sx, 2) + powf(y - sy, 2) + powf(z - sz, 2);
+			if (dist < sr*sr) {
+				s[x + y * normalDim.x + z * normalDim.x * normalDim.y] = 0;
+			}
+			else {
+				s[x + y * normalDim.x + z * normalDim.x * normalDim.y] = 1;
+			}
 		}
 	}
 }
@@ -203,10 +325,10 @@ __global__ void integrate(float *v, float *smoke, bool *s, uint3 normalDim, uint
 	if (x < normalDim.x && y < normalDim.y && z < normalDim.z) {
 		if (s[x + y * normalDim.x + z * normalDim.x * normalDim.y] != 0 && s[x + (y - 1) * normalDim.x + z * normalDim.x * normalDim.y] != 0) {
 
-			//if (v[x + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] < 0.5f) {
-				float buoyancy = buoyancy_alpha* (smoke[x + y * normalDim.x + z * normalDim.x * normalDim.y] - 0.0f);
-				v[x + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] += gravity * dt + buoyancy * dt;
-			//}
+			float buoyancy = buoyancy_alpha* (smoke[x + y * normalDim.x + z * normalDim.x * normalDim.y] - 0.0f);
+			v[x + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] += smoke[x + y * normalDim.x + z * normalDim.x * normalDim.y] * gravity * dt + buoyancy * dt;
+			//v[x + y * staggeredDim.x + z * staggeredDim.x * staggeredDim.y] +=  gravity * dt + buoyancy * dt;
+
 		}
 	}
 }
@@ -225,10 +347,10 @@ __global__ void velocityConfinement(float* u, float* v, float* w, uint3 normalDi
 
 		float velLength = u_t * u_t + v_t * v_t + w_t * w_t;
 
-		if (velLength * dt > MAX_VELOCITY_PER_STEP){
-			u[staggeredIndex] = u_t * (MAX_VELOCITY_PER_STEP/(velLength * dt));
-			v[staggeredIndex] = v_t * (MAX_VELOCITY_PER_STEP/(velLength * dt));
-			w[staggeredIndex] = w_t * (MAX_VELOCITY_PER_STEP/(velLength * dt));
+		if (velLength * dt > MAX_VELOCITY_PER_STEP* MAX_VELOCITY_PER_STEP) {
+			u[staggeredIndex] = u_t * (MAX_VELOCITY_PER_STEP * MAX_VELOCITY_PER_STEP / (velLength * dt));
+			v[staggeredIndex] = v_t * (MAX_VELOCITY_PER_STEP * MAX_VELOCITY_PER_STEP / (velLength * dt));
+			w[staggeredIndex] = w_t * (MAX_VELOCITY_PER_STEP * MAX_VELOCITY_PER_STEP /(velLength * dt));
 		}
 
 	}
@@ -665,10 +787,71 @@ int tempIndexNow = 1;
 int tempIndexPast = 0;
 int velindex = 0;
 
-float3 spherePosition = { smokeDim.x / 2.0, smokeDim.y / 2.0 , smokeDim.z / 2.0 };
 
-void setSpherePos(float x, float y, float z) {
-	spherePosition = { x,y,z };
+
+//void setSpherePos(float x, float y, float z) {
+//	spherePosition = { x,y,z };
+//}
+
+void drawObjects() {
+
+
+	//draw smokeSources
+	std::vector<Sphere> smokeSources = getObjectsOfType(1);
+	std::vector<float> smokeData;
+	for (int i = 0; i < smokeSources.size(); i++) {
+		smokeData.push_back(smokeSources[i].pos.x);
+		smokeData.push_back(smokeSources[i].pos.y);
+		smokeData.push_back(smokeSources[i].pos.z);
+		smokeData.push_back(smokeSources[i].radius);
+	}
+
+	cudaError_t err;
+
+	err = cudaMemcpy(dev_smokeSources, smokeData.data(), smokeData.size() * sizeof(float), cudaMemcpyHostToDevice);
+	if (err != cudaSuccess) {
+		fprintf(stderr, "Error copying data from host to device: %s\n", cudaGetErrorString(err));
+		exit(-1);
+	}
+
+	dim3 dimBlock(8, 8, 8); //512 
+	dim3 dimGrid(ceil(smokeDim.x / 8.0), ceil(smokeDim.y / 8.0), ceil(smokeDim.z / 8.0));
+
+
+	//printf("x:%f, y:%f, z:%f\n", spherePosition.x, spherePosition.y, spherePosition.z);
+	fillSmoke << <dimGrid, dimBlock >> > (dev_smoke[0], dev_smoke[1], smokeDim, dev_smokeSources, smokeSources.size());
+
+
+	smokeSources.clear();
+	smokeData.clear();
+
+
+
+
+	//draw obstacles
+	std::vector<Sphere> obstacles = getObjectsOfType(0); 
+	std::vector<float> obstaclesData;
+	for (int i = 0; i < obstacles.size(); i++) {
+		obstaclesData.push_back(obstacles[i].pos.x);
+		obstaclesData.push_back(obstacles[i].pos.y);
+		obstaclesData.push_back(obstacles[i].pos.z);
+		obstaclesData.push_back(obstacles[i].vel.x);
+		obstaclesData.push_back(obstacles[i].vel.y);
+		obstaclesData.push_back(obstacles[i].vel.z);
+		obstaclesData.push_back(obstacles[i].radius);
+	}
+
+	err = cudaMemcpy(dev_obstacles, obstaclesData.data(), obstaclesData.size() * sizeof(float), cudaMemcpyHostToDevice);
+	if (err != cudaSuccess) {
+		fprintf(stderr, "Error copying data from host to device: %s\n", cudaGetErrorString(err));
+		exit(-1);
+	}
+
+	fillObstacle << <dimGrid, dimBlock >> > (dev_s, smokeDim, dev_obstacles, obstacles.size());
+
+	obstacles.clear();
+	obstaclesData.clear();
+
 }
 
 
@@ -680,13 +863,18 @@ void simulate(float* smoke_grid, float dt) {
 	else tempIndexNow = 0;
 
 
-
+	drawObjects();
+	
 	dim3 dimBlock(8, 8, 8); //512 
 	dim3 dimGrid(ceil(smokeDim.x / 8.0), ceil(smokeDim.y / 8.0), ceil(smokeDim.z / 8.0));
+	
+
+	/*float3 oPosition = { 45, 20, smokeDim.z / 2.0 };
+	fillSphere << <dimGrid, dimBlock >> > (dev_w[0], dev_w[1], 5.0f, smokeStaggeredDim, oPosition, 7 * 7);
+	fillObstacle << <dimGrid, dimBlock >> > (dev_s, smokeDim, oPosition, 6 * 6);*/
 
 	
-	//printf("x:%f, y:%f, z:%f\n", spherePosition.x, spherePosition.y, spherePosition.z);
-	fillSmoke << <dimGrid, dimBlock >> > (dev_smoke[0], dev_smoke[1], smokeDim, spherePosition, 3 * 3);
+
 
 	integrate<<<dimGrid, dimBlock>>>(dev_v[smokeIndex], dev_smoke[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, dt, gravity, buoyancy_alpha);
 
@@ -704,6 +892,15 @@ void simulate(float* smoke_grid, float dt) {
 		//divergenceTemp << <divdimGrid, divdimBlock >> > (dev_u[velindex], dev_v[velindex], dev_w[velindex], dev_s, smokeDim, smokeStaggeredDim, 1);
 	}
 
+
+	/*int x = 40;
+	int y = 40;
+	int z = 40;
+	err = cudaMemset(dev_v[tempIndexNow] + (x + y * smokeStaggeredDim.x + z * smokeStaggeredDim.x * smokeStaggeredDim.y) * sizeof(float), 4.0f, sizeof(float) * 6);
+	if (err != cudaSuccess) {
+		fprintf(stderr, "Error copying data from host to device: %s\n", cudaGetErrorString(err));
+		exit(-1);
+	}*/
 
 	/*dim3 dimBlock_extrapolate_u(1, 8, 8);
 	dim3 dimGrid_extrapolate_u(1, ceil(smokeDim.y / 8.0), ceil(smokeDim.z / 8.0));
