@@ -12,9 +12,6 @@ in vec2 texCoord;
 void main()
 {
 	vec4 color = texture(viewBuffer, texCoord);
-	//fragmentColor = vec4(texCoord, 0.0f, 1.0f);
-	//if(backToFront){
-		//color.a /= color.a;
-	//}
+
 	fragmentColor = vec4(color);
 }

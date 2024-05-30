@@ -35,15 +35,9 @@ void main()
 	if(abs(pos.y - boxCenter.y) > (volumeSize.y/2-threshold)) count+=1;
 	if(abs(pos.z - boxCenter.z) > (volumeSize.z/2-threshold)) count+=1;
 
-//	vec3 col = vec3(texture(gridTex, vec3(position.xy/2+1, 0.5f)).r);
-//	fragmentColor = vec4(position.xy/2+1, 0.5f, 1.0f);
-//	return;
 
 
 	if(count >= 2) 
-		//abs(position.y - boxCenter.y) < (1.0f-threshold) ||
-		//abs(position.z - boxCenter.z) < (1.0f-threshold)
-		//vec3 color = vec3(abs(position.x - boxCenter.x) 
 		fragmentColor = vec4(vec3(0.7f), 1.0);
 	else
 		fragmentColor = vec4(1,0,0, 0.0f);

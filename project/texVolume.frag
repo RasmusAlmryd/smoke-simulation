@@ -34,23 +34,19 @@ void main()
 	volumeSize = textureSize(gridTex, 0);
 	vec3 tex_volume_pos =  (((worldFragPos - volume_pos) / (volumeSize/2)) + 1) / 2; 
 	float smoke_density = texture( gridTex,tex_volume_pos).r; 
-	//fragmentColor = vec4(vec3(tex_volume_pos), 1.0);
-	//fragmentColor.rgb *= fragmentColor.a;
-	//vec3 col = vec3(lightCoord.xy/lightCoord.w,0);
+	
+
+
 	vec3 col = baseSmokeColor;
 	float alpha = smoke_density;
 	col *= lightColor.xyz;
 
+	//pre-multiplying if rendering front-to-back
 	if(!backToFront){
 		col.rgb *= alpha;
 	}
-	//col.a *= alpha;
-	fragmentColor = vec4(col, alpha);
-	//fragmentColor = vec4(1.0, 0.0, 0.0, 1.0); // Red color
 
-	
-	//fragmentColor = vec4(vec3(1.0), 0.5);
-	//fragmentColor = vec4(viewFragPos.xy/viewFragPos.w, 0, 0.5);
-	//fragmentColor = vec4(vec3(1.0), smoke_density);
-	//fragmentColor = vec4(tex_volume_pos, 1.0);
+
+	fragmentColor = vec4(col, alpha);
+
 }
