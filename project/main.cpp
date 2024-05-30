@@ -94,6 +94,8 @@ const float simUpdatesPerSecond = 20;
 bool proxy_active = true;
 bool proxy_update = true;
 
+int proxy_step_count = 100;
+
 int count = 0;
 
 float generalUpdateDt = 0.0f;
@@ -155,7 +157,7 @@ mat4 fighterModelMatrix;
 ///////////////////////////////////////////////////////////////////////////////
 
 bool add_shadows = false;
-float shadowAlpha = 0.7f;
+float shadowAlpha = 0.4f;
 float imGuiTempColor[3] = { point_light_color.x, point_light_color.y, point_light_color.z };
 
 
@@ -290,7 +292,7 @@ void initialize()
 	environmentMap = labhelper::loadHdrTexture("../scenes/envmaps/" + envmap_base_name + ".hdr");
 
 	boundingBox.generateMesh();
-	boundingBox.initProxyGeometry(cameraPosition, cameraDirection, 100);
+	boundingBox.initProxyGeometry(cameraPosition, cameraDirection, proxy_step_count);
 	boundingBox.generateVolumeTex();
 
 
@@ -414,9 +416,6 @@ void twoPassDraw(const mat4& viewMatrix, const mat4& projectionMatrix, bool back
 	glViewport(0, 0, lightMapFB.width, lightMapFB.height);
 
 	glUseProgram(lightVolumeShaderProgram);
-	/*labhelper::setUniformSlow(lightVolumeShaderProgram, "lightViewProjectionMatrix", lightProjMatrix * lightViewMatrix);
-	labhelper::setUniformSlow(lightVolumeShaderProgram, "lightViewMatrix", lightViewMatrix);
-	labhelper::setUniformSlow(lightVolumeShaderProgram, "volume_pos", boundingBox.m_position);*/
 	glEnable(GL_BLEND);
 	glDisable(GL_CULL_FACE);
 	glDisable(GL_DEPTH_TEST);
@@ -696,7 +695,7 @@ void update(float dt) {
 		if (dot(cameraView, lightView) < 0.0) halfView = -cameraView + lightView;
 
 		
-		boundingBox.updateProxyGeometry(vec3(0.0), -halfView, 100);
+		boundingBox.updateProxyGeometry(vec3(0.0), -halfView, proxy_step_count);
 		proxy_update = false;
 	}
 }
@@ -843,6 +842,8 @@ void gui()
 	ImGui::Checkbox("Animate smoke:", &animating_smoke);
 
 	ImGui::ColorPicker3("Light color: ", &imGuiTempColor[0]);
+
+	ImGui::SliderInt("Total number proxy planes:", &proxy_step_count, 20, 200);
 	// ----------------------------------------------------------
 
 	////////////////////////////////////////////////////////////////////////////////

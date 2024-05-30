@@ -31,21 +31,16 @@ BoundingBox::BoundingBox(vec3 position, IntVec3 num_cells, int cell_size)
 	//initGrid();
 	initializeVolume(m_grid.data(), m_num_cells.x, m_num_cells.y, m_num_cells.z);
 
-	//printf(num_cells)
 
-	//m_num_cells = num_cells;
 	m_dimensions = float(m_cell_size) * num_cells.getGlmVec();
 	m_position = position;
 	printf("init done");
 	
 	m_modelMatrix = scale(mat4(1.0f), 0.5f * m_dimensions);
-	//m_modelMatrix = scale()
 	
 }
 
 void BoundingBox::updateGridDim(IntVec3 num_cells) {
-
-	//float* temp_grid = (float*) malloc(sizeof(float) * num_cells.x * num_cells.y * num_cells.z);
 
 	std::vector<float> temp_grid(num_cells.x * num_cells.y * num_cells.z);
 
@@ -94,26 +89,10 @@ float pseudoangle(float y, float x)
 	float r = x / (abs(x) + abs(y));
 	if (y < 0) return 1. + r;
 	return 3. - r;
-	//return sign(y)* (1. - x / (abs(x) + abs(y)));
-	//float p = x / (abs(x) + abs(y)); //  - 1 .. 1 increasing with x
-	//if (y < 0) return p - 1;			//  - 2 .. 0 increasing with x
-	//return 1 - p;  //  0 .. 2 decreasing with x
-	//return copysign(1. - x / (fabs(x) + fabs(y)), y);
 }
 
 void BoundingBox::generateMesh(void) {
 
-
-	/*static const GLfloat positions[] = {
-	-1.0, -1.0,  1.0,
-	1.0, -1.0,  1.0,
-	-1.0,  1.0,  1.0,
-	1.0,  1.0,  1.0,
-	-1.0, -1.0, -1.0,
-	1.0, -1.0, -1.0,
-	-1.0,  1.0, -1.0,
-	1.0,  1.0, -1.0,
-	};*/
 
 	const vec3 box_positions[8] = {
 		vec3(-1.0, -1.0,  1.0),
@@ -127,17 +106,12 @@ void BoundingBox::generateMesh(void) {
 	};
 
 
-	// Create a handle for the vertex array object
 	glGenVertexArrays(1, &m_vao); 
-	// Set it as current, i.e., related calls will affect this object
 	glBindVertexArray(m_vao); 
 
 
-	// Create a handle for the vertex position buffer
 	glGenBuffers(1, &m_positionBuffer);
-	// Set the newly created buffer as the current one
 	glBindBuffer(GL_ARRAY_BUFFER, m_positionBuffer);
-	// Send the vetex position data to the current buffer
 	glBufferData(GL_ARRAY_BUFFER, sizeof(box_positions), box_positions, GL_STATIC_DRAW);
 	glEnableVertexAttribArray(0); 
 	glVertexAttribPointer(0, 3, GL_FLOAT, false /*normalized*/, 0 /*stride*/, 0 /*offset*/); 
@@ -299,7 +273,6 @@ void sortPoints(std::vector<vec3> &points, int numPoints, vec3 planeOrigin, vec3
 
 bool rayPlaneIntersection(vec3 &intersectionPoint, vec3 rayOrigin, vec3 rayDir, float max_t, vec3 planeOrigin, vec3 planeNormal) {
 
-	//if (dot(rayDir, planeNormal) < 0.001) return false;
 	 
 	float t = dot((planeOrigin - rayOrigin), planeNormal) / dot(rayDir, planeNormal);
 	if (t > max_t || t < 0) return false;
@@ -390,25 +363,6 @@ bool duplicate(vec3 point, std::vector<vec3> points) {
 
 void BoundingBox::generateVolumeTex(void) {
 
-
-	//printf("%d %d %d", m_num_cells.x, m_num_cells.y, m_num_cells.z);
-	//printf("tot len: %d", m_num_cells.x * m_num_cells.y * m_num_cells.z);
-
-	/*for (int x = 0; x < m_num_cells.x; x++) {
-		for (int y = 0; y < m_num_cells.y; y++) {
-			for (int z = 0; z < m_num_cells.z; z++) {
-				if ((x == 0 || x == m_num_cells.x - 1) && (y == 0 || y == m_num_cells.y - 1) && (z == 0 || z == m_num_cells.z - 1)) {
-					m_grid[x + y * m_num_cells.x + z * m_num_cells.x * m_num_cells.y] = 1.0f;
-				}
-				else if(x==y)
-					m_grid[x + y * m_num_cells.x + z * m_num_cells.x * m_num_cells.y] = 1.0f;
-
-			}
-		}
-	}*/
-
-
-
 	glGenTextures(1, &m_gridTex);
 	glBindTexture(GL_TEXTURE_3D, m_gridTex);
 
@@ -439,23 +393,7 @@ void BoundingBox::updateVolume(float dt) {
 	uppdateVolumeTexture();
 }
 
-void addQuadPoints(float positions[], int offset, vec3 p0, vec3 p1, vec3 p2, vec3 p3) {
-	float points[3 * 3 * 2] = {
-		//first triangle
-		p0.x, p0.y, p0.z,
-		p1.x, p1.y, p1.z,
-		p2.x, p2.y, p2.z,
 
-		// second triangle
-		p0.x, p0.y, p0.z,
-		p2.x, p2.y, p2.z,
-		p3.x, p3.y, p3.z,
-	};
-
-	for (int i = 0; i < 3 * 3 * 2; i++) {
-		positions[offset + i] = points[i];
-	}
-}
 
 void BoundingBox::freeGrid(void) {
 	//free(m_grid);
@@ -465,6 +403,7 @@ void BoundingBox::freeGrid(void) {
 }
 
 
+//Bounding box triangles
 void BoundingBox::submitTriangles(void)
 {
 	if (m_vao == UINT32_MAX)
@@ -473,17 +412,16 @@ void BoundingBox::submitTriangles(void)
 		return;
 	}
 
-	//glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
 	glBindVertexArray(m_vao);
-	//glDrawElements(GL_TRIANGLES, 108, GL_UNSIGNED_INT, 0);
-	//glDrawArrays(GL_TRIANGLES, 0, 12 * 3);
 	glDrawElements(GL_TRIANGLE_STRIP, 14, GL_UNSIGNED_SHORT, 0);
 
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
 }
 
+
+// Submit all proxy planes at the same time
 void BoundingBox::submitProxyGeometry(void)
 {
 	if (m_proxy_vao == UINT32_MAX)
@@ -492,19 +430,15 @@ void BoundingBox::submitProxyGeometry(void)
 		return;
 	}
 
-	//glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
 	glBindVertexArray(m_proxy_vao);
-	//glDrawElements(GL_TRIANGLES, 108, GL_UNSIGNED_INT, 0);
-	//glDrawArrays(GL_TRIANGLES, 0, 12 * 3);
-	//glDrawArrays(GL_TRIANGLES, 0, m_num_proxy_triangles * 3);
-	//glDrawElements(GL_TRIANGLES, m_num_proxy_triangles, GL_UNSIGNED_SHORT, 0);
 	glDrawElements(GL_TRIANGLES, m_num_proxy_triangles*3, GL_UNSIGNED_SHORT, 0);
 
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
 }
 
+// Submit proxy plane according to index
 void BoundingBox::submitProxyPlane(int planeIndex) {
 	if (m_proxy_vao == UINT32_MAX)
 	{
@@ -519,7 +453,6 @@ void BoundingBox::submitProxyPlane(int planeIndex) {
 	}
 
 
-	//glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
 	glBindVertexArray(m_proxy_vao);
 
