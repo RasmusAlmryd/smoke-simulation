@@ -17,11 +17,11 @@ uint3 smokeDim;
 uint3 smokeStaggeredDim;
 
 int smokeIndex = 0; // (0,1)
-float* dev_smoke[2];
-float* dev_u[2];
-float* dev_v[2];
-float* dev_w[2];
-bool* dev_s;
+float* dev_smoke[2]; // Smoke density
+float* dev_u[2]; // x-velocity
+float* dev_v[2]; // y-velocity
+float* dev_w[2]; // z-velocity
+bool* dev_s; // is solid
 
 
 
@@ -142,10 +142,7 @@ void initializeVolume(float* smoke_grid, unsigned int width, unsigned int heigth
 	}
 
 
-	/*
-	*	should be different for each velocity axis.
-	*	ex u size: x: dim.x+1, y: dim.y, z: dim.z
-	*/
+
 	int velSize = (width+1) * (heigth+1) * (depth+1) * sizeof(float); 
 	smokeStaggeredDim = { (width + 1) , (heigth + 1) , (depth + 1) };
 
@@ -707,7 +704,7 @@ __global__ void smokeKernal(float *grid, int width, int height, int depth) {
 	}
 }
 
-int tempIndexNow = 1;
+int indexNow = 1;
 int tempIndexPast = 0;
 int velindex = 0;
 
@@ -777,9 +774,9 @@ void drawObjects() {
 void simulate(float* smoke_grid, float dt) {
 	cudaError_t err;
 
-	tempIndexPast = tempIndexNow;
-	if (tempIndexNow == 0) tempIndexNow = 1;
-	else tempIndexNow = 0;
+	tempIndexPast = indexNow;
+	if (indexNow == 0) indexNow = 1;
+	else indexNow = 0;
 
 
 	drawObjects();
@@ -789,9 +786,9 @@ void simulate(float* smoke_grid, float dt) {
 	dim3 dimBlock(8, 8, 8); //512 
 	dim3 dimGrid(ceil(smokeDim.x / 8.0), ceil(smokeDim.y / 8.0), ceil(smokeDim.z / 8.0));
 	
-	integrate<<<dimGrid, dimBlock>>>(dev_v[smokeIndex], dev_smoke[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, dt, gravity, buoyancy_alpha);
+	integrate<<<dimGrid, dimBlock>>>(dev_v[indexNow], dev_smoke[indexNow], dev_s, smokeDim, smokeStaggeredDim, dt, gravity, buoyancy_alpha);
 
-	velocityConfinement << <dimGrid, dimBlock >> > (dev_u[tempIndexNow], dev_v[tempIndexNow], dev_w[tempIndexNow], smokeDim, smokeStaggeredDim, dt);
+	velocityConfinement << <dimGrid, dimBlock >> > (dev_u[indexNow], dev_v[indexNow], dev_w[indexNow], smokeDim, smokeStaggeredDim, dt);
 
 
 
@@ -799,18 +796,18 @@ void simulate(float* smoke_grid, float dt) {
 	dim3 divdimGrid(ceil(ceil(smokeDim.x / 2.0) / 8.0), ceil(smokeDim.y / 8.0), ceil(smokeDim.z / 8.0));
 	int num_iterations = 30;
 	for (int i = 0; i < num_iterations; i++) {
-		divergence << <divdimGrid, divdimBlock >> > (dev_u[tempIndexNow], dev_v[tempIndexNow], dev_w[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, 0);
-		divergence << <divdimGrid, divdimBlock >> > (dev_u[tempIndexNow], dev_v[tempIndexNow], dev_w[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, 1);
+		divergence << <divdimGrid, divdimBlock >> > (dev_u[indexNow], dev_v[indexNow], dev_w[indexNow], dev_s, smokeDim, smokeStaggeredDim, 0);
+		divergence << <divdimGrid, divdimBlock >> > (dev_u[indexNow], dev_v[indexNow], dev_w[indexNow], dev_s, smokeDim, smokeStaggeredDim, 1);
 	}
 
 
 
-	velocityAdvectionU << <dimGrid, dimBlock >> > (dev_u[tempIndexNow], dev_u[tempIndexPast], dev_v[tempIndexNow], dev_w[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, dt);
-	velocityAdvectionV << <dimGrid, dimBlock >> > (dev_v[tempIndexNow], dev_v[tempIndexPast], dev_u[tempIndexNow], dev_w[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, dt);
-	velocityAdvectionW << <dimGrid, dimBlock >> > (dev_w[tempIndexNow], dev_w[tempIndexPast], dev_u[tempIndexNow], dev_v[tempIndexNow], dev_s, smokeDim, smokeStaggeredDim, dt);
+	velocityAdvectionU << <dimGrid, dimBlock >> > (dev_u[indexNow], dev_u[tempIndexPast], dev_v[indexNow], dev_w[indexNow], dev_s, smokeDim, smokeStaggeredDim, dt);
+	velocityAdvectionV << <dimGrid, dimBlock >> > (dev_v[indexNow], dev_v[tempIndexPast], dev_u[indexNow], dev_w[indexNow], dev_s, smokeDim, smokeStaggeredDim, dt);
+	velocityAdvectionW << <dimGrid, dimBlock >> > (dev_w[indexNow], dev_w[tempIndexPast], dev_u[indexNow], dev_v[indexNow], dev_s, smokeDim, smokeStaggeredDim, dt);
 
 
-	advectSmoke << <dimGrid, dimBlock >> > (dev_smoke[tempIndexNow], dev_smoke[tempIndexPast], dev_u[tempIndexPast], dev_v[tempIndexPast], dev_w[tempIndexPast], dev_s, smokeDim, smokeStaggeredDim, dt);
+	advectSmoke << <dimGrid, dimBlock >> > (dev_smoke[indexNow], dev_smoke[tempIndexPast], dev_u[tempIndexPast], dev_v[tempIndexPast], dev_w[tempIndexPast], dev_s, smokeDim, smokeStaggeredDim, dt);
 
 	uint3 dir = { 0,1,0 };
 

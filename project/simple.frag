@@ -31,7 +31,7 @@ void main()
 	if(lightCoord.x < 0.0f || lightCoord.x > 1.0f || lightCoord.y < 0.0f || lightCoord.y > 1.0f) shadowColor = vec3(1.0f);
 
 
-	vec4 color = texture(colorMap, worldPos.xz/10);
+	vec4 color = texture(colorMap, vec2(worldPos.x, worldPos.z*-1.0)/10);
 	if(add_shadow) color *= shadowColor.x;
 
 	fragmentColor = vec4(color.xyz, 1.0);

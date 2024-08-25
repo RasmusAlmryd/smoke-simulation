@@ -64,6 +64,7 @@ GLuint testShaderProgram;
 float environment_multiplier = 1.5f;
 GLuint environmentMap;
 const std::string envmap_base_name = "001";
+const vec3 bg_color = vec3(20.0f / 255.0f);
 
 ///////////////////////////////////////////////////////////////////////////////
 // Light source
@@ -117,8 +118,8 @@ int obstacleId2;
 ///////////////////////////////////////////////////////////////////////////////
 // Floor
 ///////////////////////////////////////////////////////////////////////////////
-int floorWidth = 1000;
-int floorDepth = 1000;
+int floorWidth = 300;
+int floorDepth = 300;
 vec3 floorPos(0.0f,-40.0f,0.0f);
 GLuint floorVAO;
 GLuint floorPB;
@@ -141,8 +142,6 @@ FboInfo viewFB;
 ///////////////////////////////////////////////////////////////////////////////
 // Models
 ///////////////////////////////////////////////////////////////////////////////
-labhelper::Model* fighterModel = nullptr;
-labhelper::Model* landingpadModel = nullptr;
 labhelper::Model* sphereModel = nullptr;
 
 labhelper::Texture floorTexture;
@@ -157,7 +156,7 @@ mat4 fighterModelMatrix;
 ///////////////////////////////////////////////////////////////////////////////
 
 bool add_shadows = false;
-float shadowAlpha = 0.4f;
+float shadowAlpha = 0.6f;
 float imGuiTempColor[3] = { point_light_color.x, point_light_color.y, point_light_color.z };
 
 
@@ -184,35 +183,30 @@ void loadShaders(bool is_reload)
 	shader = labhelper::loadShaderProgram("../project/boundingBox.vert", "../project/boundingBox.frag" , is_reload);
 	if (shader != 0)
 	{
-		std::cout << "shader" << std::endl;
 		boundingShaderProgram = shader;
 	}
 
 	shader = labhelper::loadShaderProgram("../project/volume.vert", "../project/volume.frag", is_reload);
 	if (shader != 0)
 	{
-		std::cout << "shader" << std::endl;
 		volumeShaderProgram = shader;
 	}
 
 	shader = labhelper::loadShaderProgram("../project/texVolume.vert", "../project/texVolume.frag", is_reload);
 	if (shader != 0)
 	{
-		std::cout << "shader" << std::endl;
 		texVolumeShaderProgram = shader;
 	}
 
 	shader = labhelper::loadShaderProgram("../project/light.vert", "../project/light.frag", is_reload);
 	if (shader != 0)
 	{
-		std::cout << "shader" << std::endl;
 		lightVolumeShaderProgram = shader;
 	}
 
 	shader = labhelper::loadShaderProgram("../project/test.vert", "../project/test.frag", is_reload);
 	if (shader != 0)
 	{
-		std::cout << "shader" << std::endl;
 		testShaderProgram = shader;
 	}
 }
@@ -270,17 +264,12 @@ void initialize()
 	///////////////////////////////////////////////////////////////////////
 	// Load models and set up model matrices
 	///////////////////////////////////////////////////////////////////////
-	fighterModel = labhelper::loadModelFromOBJ("../scenes/NewShip.obj");
-	landingpadModel = labhelper::loadModelFromOBJ("../scenes/landingpad.obj");
 	sphereModel = labhelper::loadModelFromOBJ("../scenes/sphere.obj");
 
 	floorTexture.load("../scenes/", "floor.png", 3);
 	initFloor();
 
 
-
-
-	printf("sphere: %d", sphereModel->m_vaob);
 
 	roomModelMatrix = mat4(1.0f);
 	fighterModelMatrix = translate(15.0f * worldUp);
@@ -319,7 +308,6 @@ void initialize()
 
 	glBindTexture(GL_TEXTURE_2D, viewFB.depthBuffer);
 
-	printf("light id: %d, view id: %d\n", viewFB.framebufferId, lightMapFB.framebufferId);
 }
 
 void debugDrawLight(const glm::mat4& viewMatrix,
@@ -621,7 +609,7 @@ void display(void)
 	if (animating_smoke) {
 		vec4 sphereStartPos = vec4(20, 0, 0, 1);
 		vec3 newSpherePos;
-		newSpherePos = smokePos + vec3(rotate(currentTime*2, worldUp) * sphereStartPos );
+		newSpherePos = smokePos + vec3(rotate(currentTime*1, worldUp) * sphereStartPos );
 		updateObjectPos(smokeSourceId1, newSpherePos.x, newSpherePos.y, newSpherePos.z);
 	}
 	else {
@@ -643,15 +631,15 @@ void display(void)
 	///////////////////////////////////////////////////////////////////////////
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glViewport(0, 0, windowWidth, windowHeight);
-	vec3 bg_color = vec3(40.0f / 255.0f);
+	
 	glClearColor(bg_color.x, bg_color.y, bg_color.z, 1.0f);
 	//glClearColor(0.2f, 0.2f, 0.8f, 1.0f);
 
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	{
-		labhelper::perf::Scope s( "Background" );
-		drawBackground(viewMatrix, projMatrix);
+		//labhelper::perf::Scope s( "Background" );
+		//drawBackground(viewMatrix, projMatrix);
 	}
 	{
 		labhelper::perf::Scope s( "Scene" );
@@ -743,7 +731,7 @@ bool handleEvents(void)
 		}
 		if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_r) {
 			simRunning = !simRunning;
-			printf("start sim: %d\n", simRunning);
+			printf("Simulation Running: %b\n", simRunning);
 		}
 		if(event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT
 		   && (!labhelper::isGUIvisible() || !ImGui::GetIO().WantCaptureMouse))
@@ -826,6 +814,11 @@ bool handleEvents(void)
 ///////////////////////////////////////////////////////////////////////////////
 void gui()
 {
+	labhelper::perf::drawEventsWindow();
+
+	if (!labhelper::isGUIvisible()) {
+		return;
+	}
 
 	// ----------------- Set variables --------------------------
 	ImGui::Text("Application average %.3f ms/frame (%.1f FPS) , ACTUAL: %.3f", 1000.0f / ImGui::GetIO().Framerate,
@@ -849,7 +842,9 @@ void gui()
 	////////////////////////////////////////////////////////////////////////////////
 	////////////////////////////////////////////////////////////////////////////////
 
-	labhelper::perf::drawEventsWindow();
+	
+
+	
 }
 
 int main(int argc, char* argv[])
@@ -918,8 +913,6 @@ int main(int argc, char* argv[])
 		SDL_GL_SwapWindow(g_window);
 	}
 	// Free Models
-	labhelper::freeModel(fighterModel);
-	labhelper::freeModel(landingpadModel);
 	labhelper::freeModel(sphereModel);
 
 	boundingBox.freeGrid();
