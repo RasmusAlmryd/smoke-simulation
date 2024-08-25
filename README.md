@@ -1,5 +1,6 @@
 
 # GPU-Based Smoke Simulation and Rendering
+<div align="center"><img src="https://github.com/user-attachments/assets/198b6e67-6445-47dd-9fed-53725c2ed2b1" style="width: 50%"/></div>
 
 This project focused on developing a high-performance smoke simulation and rendering system, leveraging the parallel processing capabilities of the GPU through CUDA and OpenGL. The primary goal was to create a Semi-Lagrangian smoke simulation that could be rendered with consideration for visual effects such as transparency and self-shadowing.
 
