@@ -19,6 +19,8 @@ The rendering strategy is based on NVIDIA's GPU Gems, particularly Chapter 39.5.
 - Main Bottleneck: overdraw, proxy geometry, data communication
 
 ### Accomplishments
+<div align="center"><img src="https://github.com/user-attachments/assets/1c134a23-5e9c-45a6-b8a4-5056dda6fa31" style="width: 50%"/><p>Smoke demonstration with normal and inverted gravity</p></div>
+
 - **GPU-Accelerated Smoke Simulation**: The project successfully implemented a semi-Lagrangian smoke simulation that runs in parallel on the GPU using CUDA. This approach enabled the simulation to handle complex smoke dynamics in real time.
 - **Transparent and Self-Shadowing Rendering**: The rendering process incorporated techniques to account for both transparency and self-shadowing. By dividing the smoke volume into planes oriented towards the camera-light halfway vector, the project ensured that the smoke rendered correctly in various lighting orientations. If the angle between the vectors becomes larger than 90 degrees, the inverse of the view vector is used, and the smoke is rendered in the opposite order. As a result, the rendering pipeline supports both back-to-front and front-to-back rendering.
 - **Object Avoidance**: Each cell in the simulation's 3D grid is defined as either solid or air, enabling smoke object avoidance with precision at the level of individual cells.
